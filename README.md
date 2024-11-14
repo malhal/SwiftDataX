@@ -4,10 +4,9 @@ SwiftDataX brings extended features to SwiftData like an `NSFetchedResultsContro
 
 It currently uses a private notification for model context changes which could be a problem for app review but probably not since it is just a string and not a private method.
 
-Here is an example of how `@DynamicQuery` can be used to fetch detail items:
+Here is an example of how `@DynamicQuery` can be used to fetch detail items, updating the predicate whenever the parent item changes:
 ```
 import SwiftUI
-import SwiftData
 import SwiftDataX
 
 struct DetailView: View {
@@ -26,18 +25,6 @@ struct DetailView: View {
                 }
             }
         }
-        .toolbar {
-#if os(iOS)
-            ToolbarItem(placement: .navigationBarTrailing) {
-                EditButton()
-            }
-#endif
-            ToolbarItem {
-                Button(action: addItem) {
-                    Label("Add Item", systemImage: "plus")
-                }
-            }
-        }
         .onChange(of: item, initial: true) {
             let id = item.persistentModelID
             let filter = #Predicate<SubItem> { subItem in
@@ -46,21 +33,7 @@ struct DetailView: View {
             _result.fetchDescriptor.predicate = filter
         }
     }
-    
-    private func addItem() {
-        withAnimation {
-            let newSubItem = SubItem(item: item, timestamp: Date())
-            modelContext.insert(newSubItem)
-        }
-        
-    }
-    
-    private func deleteItems(offsets: IndexSet, subItems: [SubItem]) {
-        withAnimation {
-            for index in offsets {
-               modelContext.delete(subItems[index])
-            }
-        }
-    }
+	
+	...
 }
 ```
