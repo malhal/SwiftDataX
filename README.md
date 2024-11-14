@@ -37,3 +37,58 @@ struct DetailView: View {
 	...
 }
 ```
+Here is another example where the sort is `@State` bool source of truth which could be easily replaced with `@SceneStorage` or `@AppStorage`:
+```
+import SwiftUI
+import SwiftDataX
+
+struct ContentView: View {
+    @Environment(\.modelContext) private var modelContext
+    @DynamicQuery var result: Result<[Item], Error>
+    @State var selectedItem: Item?
+    @State var ascending = false
+ 
+    var sortDescriptors: Binding<[SortDescriptor<Item>]> {
+        Binding {
+            _result.fetchDescriptor.sortBy
+        } set: { v in
+            // after this, the onChange will set the new sortDescriptor.
+            ascending = v.first?.order == .forward
+        }
+    }
+    
+    var body: some View {
+        NavigationSplitView {
+            List(selection: $selectedItem) {
+                if case let .success(items) = result {
+                    ForEach(items) { item in
+                        NavigationLink(value: item) {
+                            Text(item.timestamp, format: Date.FormatStyle(date: .numeric, time: .standard))
+                        }
+                    }
+                    .onDelete { indexSet in
+                        deleteItems(offsets: indexSet, items: items)
+                    }
+                }
+            }
+            .toolbar {
+                ToolbarItem {
+                    Button(ascending ? "Desc" : "Asc") {
+                        ascending.toggle()
+                    }
+                }
+            }
+        } detail: {
+            if let selectedItem {
+                DetailView(item: selectedItem)
+            }
+            else {
+                Text("Select an item")
+            }
+        }
+        .onChange(of: ascending, initial: true) {
+            _result.fetchDescriptor.sortBy = [SortDescriptor(\Item.timestamp, order: ascending ? .forward : .reverse)]
+        }
+    }
+}
+```
