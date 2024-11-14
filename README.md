@@ -40,13 +40,12 @@ struct DetailView: View {
 	...
 }
 ```
-Here is another example where the sort is `@State` bool source of truth which could be easily replaced with `@SceneStorage` or `@AppStorage`:
+The sort can be a `@State` bool source of truth which could be easily replaced with `@SceneStorage` or `@AppStorage`. In the example below a computed binding is used to make it work with a `Table`:
 ```
 import SwiftUI
 import SwiftDataX
 
-struct ContentView: View {
-    @Environment(\.modelContext) private var modelContext
+struct ItemTable: View {
     @DynamicQuery var result: Result<[Item], Error>
     @State var selectedItem: Item?
     @State var ascending = false
@@ -61,34 +60,27 @@ struct ContentView: View {
     }
     
     var body: some View {
-        NavigationSplitView {
-            List(selection: $selectedItem) {
-                if case let .success(items) = result {
-                    ForEach(items) { item in
-                        NavigationLink(value: item) {
-                            Text(item.timestamp, format: Date.FormatStyle(date: .numeric, time: .standard))
-                        }
-                    }
-                    .onDelete { indexSet in
-                        deleteItems(offsets: indexSet, items: items)
+		Group {
+			switch (result) {
+		    	case .success(let items):
+    		        Table(results, sortOrder: sortOrder) {
+	    	            TableColumn("timestamp", value: \.timestamp) { item in
+		                    Text("Item at \(item.timestamp ?? Date(), formatter: itemFormatter)")
+	    	            }
+					}
+		        case .failure(let error):
+				    Text(error.localizedDescription)
+			}
+		}
+		.toolbar(id: "myToolbar") {
+           ToolbarItem(id: "myItem", placement: .primaryAction) {
+                Button(config.ascending ? "Hi" : "A-Z") {
+                    withAnimation {
+                        config.ascending.toggle()
                     }
                 }
-            }
-            .toolbar {
-                ToolbarItem {
-                    Button(ascending ? "Desc" : "Asc") {
-                        ascending.toggle()
-                    }
-                }
-            }
-        } detail: {
-            if let selectedItem {
-                DetailView(item: selectedItem)
-            }
-            else {
-                Text("Select an item")
-            }
-        }
+			}
+        }		
         .onChange(of: ascending, initial: true) {
             _result.fetchDescriptor.sortBy = [SortDescriptor(\Item.timestamp, order: ascending ? .forward : .reverse)]
         }
