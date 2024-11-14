@@ -36,8 +36,8 @@ struct DetailView: View {
             _result.fetchDescriptor.predicate = filter
         }
     }
-	
-	...
+    
+    ...
 }
 ```
 The sort can be a `@State` bool source of truth which could be easily replaced with `@SceneStorage` or `@AppStorage`. In the example below a computed binding is used to make it work with a `Table`:
@@ -60,27 +60,27 @@ struct ItemTable: View {
     }
     
     var body: some View {
-		Group {
-			switch (result) {
-		    	case .success(let items):
-    		        Table(results, sortOrder: sortOrder) {
-	    	            TableColumn("timestamp", value: \.timestamp) { item in
-		                    Text("Item at \(item.timestamp ?? Date(), formatter: itemFormatter)")
-	    	            }
-					}
-		        case .failure(let error):
-				    Text(error.localizedDescription)
-			}
-		}
-		.toolbar(id: "myToolbar") {
+        Group {
+            switch (result) {
+                case .success(let items):
+                    Table(results, sortOrder: sortOrder) {
+                        TableColumn("timestamp", value: \.timestamp) { item in
+                            Text("Item at \(item.timestamp ?? Date(), formatter: itemFormatter)")
+                        }
+                    }
+                case .failure(let error):
+                    Text(error.localizedDescription)
+            }
+        }
+        .toolbar(id: "myToolbar") {
            ToolbarItem(id: "myItem", placement: .primaryAction) {
                 Button(config.ascending ? "Hi" : "A-Z") {
                     withAnimation {
                         config.ascending.toggle()
                     }
                 }
-			}
-        }		
+            }
+        }        
         .onChange(of: ascending, initial: true) {
             _result.fetchDescriptor.sortBy = [SortDescriptor(\Item.timestamp, order: ascending ? .forward : .reverse)]
         }
