@@ -75,9 +75,7 @@ struct ItemTable: View {
         .toolbar(id: "myToolbar") {
            ToolbarItem(id: "myItem", placement: .primaryAction) {
                 Button(config.ascending ? "Hi" : "A-Z") {
-                    withAnimation {
-                        config.ascending.toggle()
-                    }
+                    config.ascending.toggle()
                 }
             }
         }        
