@@ -10,9 +10,11 @@ extension FetchedResultsController: ObservableObject { }
     @StateObject private var fetchedResultsController = FetchedResultsController<ResultType>()
     
     private let initialFetchDescriptor: FetchDescriptor<ResultType>
+    private let initialTransaction: Transaction
     
-    public init(initialFetchDescriptor: FetchDescriptor<ResultType> = .init()) {
+    public init(initialFetchDescriptor: FetchDescriptor<ResultType> = .init(), initialTransaction: Transaction = Transaction(animation: .default)) {
         self.initialFetchDescriptor = initialFetchDescriptor
+        self.initialTransaction = initialTransaction
     }
     
     public var fetchDescriptor: FetchDescriptor<ResultType> {
@@ -21,6 +23,15 @@ extension FetchedResultsController: ObservableObject { }
         }
         nonmutating set {
             fetchedResultsController.fetchDescriptor = newValue
+        }
+    }
+    
+    public var transaction: Transaction {
+        get {
+            fetchedResultsController.transaction
+        }
+        nonmutating set {
+            fetchedResultsController.transaction = newValue
         }
     }
     
@@ -35,6 +46,9 @@ extension FetchedResultsController: ObservableObject { }
     public func update() {
         if fetchedResultsController.fetchDescriptor == nil {
             fetchedResultsController.fetchDescriptor = initialFetchDescriptor
+        }
+        if fetchedResultsController.transaction == nil {
+            fetchedResultsController.transaction = initialTransaction
         }
         if fetchedResultsController.modelContext != modelContext {
             fetchedResultsController.modelContext = modelContext

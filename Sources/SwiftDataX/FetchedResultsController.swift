@@ -1,5 +1,6 @@
 import Foundation
 import SwiftData
+import SwiftUI
 
 @Observable
 public class FetchedResultsController<T: PersistentModel> {
@@ -25,6 +26,8 @@ public class FetchedResultsController<T: PersistentModel> {
         }
     }
     
+    public var transaction: Transaction!
+    
     @objc private func contextModelsChanged(_ notification: Notification) {
         guard let userInfo = notification.userInfo else { return }
         // since AnyPersistentObject is private we need to use string comparison of the types
@@ -32,7 +35,9 @@ public class FetchedResultsController<T: PersistentModel> {
         for key in ["updated", "inserted", "deleted"] {
             if let set = userInfo[key] as? Set<AnyHashable> {
                 if set.contains(where: { String(describing: $0) == search }) {
-                    _results = nil
+                    withTransaction(transaction) {
+                        _results = nil
+                    }
                     return
                 }
             }
