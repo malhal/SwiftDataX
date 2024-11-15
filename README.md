@@ -1,6 +1,6 @@
 # SwiftDataX
 
-SwiftDataX brings extended features to SwiftData like an `NSFetchedResultsController` and `@Query` with dynamic predicate and sort descriptors.
+SwiftDataX brings extended features to SwiftData like `NSFetchedResultsController` and a `@Query` alternative that has dynamic predicate and sort descriptors.
 
 * `@DynamicQuery`: like `@Query` but offers dynamic configuration of the fetch descriptor, i.e. the predicate and sort. It uses a Swift `Result` type to represent either valid results or an error as one value. 
 * `FetchedResultsController`: an `@Observable` implementation of a fetch controller for SwiftData similar to `NSFetchedResultsController`.
