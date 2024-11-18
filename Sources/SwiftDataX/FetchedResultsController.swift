@@ -14,7 +14,7 @@ public class FetchedResultsController<T: PersistentModel> {
     
     public var modelContext: ModelContext! {
         didSet {
-            if modelContext == oldValue { return } // perhaps should be removed, to have same semantics as the current var fetchDescriptor
+            // if modelContext == oldValue { return } // perhaps should be removed, to have same semantics as the current var fetchDescriptor
             _results = nil
             NotificationCenter.default.removeObserver(self)
             if let modelContext {
@@ -26,7 +26,6 @@ public class FetchedResultsController<T: PersistentModel> {
         }
     }
     
-    public var transaction: Transaction!
     
     @objc private func contextModelsChanged(_ notification: Notification) {
         guard let userInfo = notification.userInfo else { return }
@@ -35,9 +34,7 @@ public class FetchedResultsController<T: PersistentModel> {
         for key in ["updated", "inserted", "deleted"] {
             if let set = userInfo[key] as? Set<AnyHashable> {
                 if set.contains(where: { String(describing: $0) == search }) {
-                    withTransaction(transaction) {
-                        _results = nil
-                    }
+                    _results = nil
                     return
                 }
             }

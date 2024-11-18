@@ -2,7 +2,7 @@
 
 SwiftDataX brings extended features to SwiftData like `NSFetchedResultsController` and a `@Query` alternative that has dynamic predicate and sort descriptors.
 
-* `@DynamicQuery`: like `@Query` but offers dynamic configuration of the fetch descriptor, i.e. the predicate and sort. It uses a Swift `Result` type to represent either valid results or an error as one value. 
+* `@DynamicQuery`: like `@Query` but offers dynamic configuration of the fetch descriptor, i.e. the predicate and sort. It uses a Swift `Result` type to represent either valid results or an error as one value. Animation and transaction params have been removed and the .animation modifier is preferred, other property wrappers like @AppStorage don't have these params either.
 * `FetchedResultsController`: an `@Observable` implementation of a fetch controller for SwiftData similar to `NSFetchedResultsController`.
 
 Note: It currently uses a private notification for model context changes which could be a problem for app review but probably not since it is just a string and not a private method.
@@ -18,13 +18,28 @@ struct DetailView: View {
     @DynamicQuery(initialFetchDescriptor: .init(sortBy: [.init(\SubItem.timestamp, order: .reverse)])) var result: Result<[SubItem], Error>
 
     var body: some View {
-        List {
-            if case let .success(subItems) = result {
-                ForEach(subItems) { subItem in
-                    Text(subItem.timestamp, format: Date.FormatStyle(date: .numeric, time: .standard))
-                }
-                .onDelete { offsets in
-                    deleteItems(offsets: offsets, subItems: subItems)
+        Group {
+            switch(result) {
+                case .success(let subItems):
+                    List {
+                        ForEach(subItems) { subItem in
+                            Text(subItem.timestamp, format: Date.FormatStyle(date: .numeric, time: .standard))
+                        }
+                        .onDelete { offsets in
+                            deleteItems(offsets: offsets, subItems: subItems)
+                        }
+                    }
+                    .animation(.default, value: subItems)
+                case .failure(let error):
+                    Text(error.localizedDescription)
+            }
+        }
+        .toolbar {
+            ToolbarItem {
+                Button(ascending ? "Desc" : "Asc") {
+                    withAnimation {
+                        ascending.toggle()
+                    }
                 }
             }
         }
@@ -68,17 +83,11 @@ struct ItemTable: View {
                             Text("Item at \(item.timestamp ?? Date(), formatter: itemFormatter)")
                         }
                     }
+                    .animation(.default, value: items)
                 case .failure(let error):
                     Text(error.localizedDescription)
             }
-        }
-        .toolbar(id: "myToolbar") {
-           ToolbarItem(id: "myItem", placement: .primaryAction) {
-                Button(config.ascending ? "A-Z" : "Z-A") {
-                    config.ascending.toggle()
-                }
-            }
-        }        
+        }      
         .onChange(of: ascending, initial: true) {
             _result.fetchDescriptor.sortBy = [SortDescriptor(\Item.timestamp, order: ascending ? .forward : .reverse)]
         }
