@@ -1,13 +1,10 @@
 @preconcurrency import SwiftData
 @preconcurrency import SwiftUI
 
-// Just so it can be used as @StateObject.
-extension FetchedResultsController: ObservableObject { }
-
 @MainActor @propertyWrapper @preconcurrency public struct DynamicQuery<ResultType>: @preconcurrency DynamicProperty where ResultType: PersistentModel {
     
     @Environment(\.modelContext) private var modelContext
-    @StateObject private var fetchedResultsController = FetchedResultsController<ResultType>()
+    @StateObject private var coordinator = Coordinator()
     
     private let initialFetchDescriptor: FetchDescriptor<ResultType>
     
@@ -17,27 +14,61 @@ extension FetchedResultsController: ObservableObject { }
     
     public var fetchDescriptor: FetchDescriptor<ResultType> {
         get {
-            fetchedResultsController.fetchDescriptor
+            coordinator.fetchDescriptor ?? initialFetchDescriptor
         }
         nonmutating set {
-            fetchedResultsController.fetchDescriptor = newValue
+            coordinator.fetchDescriptor = newValue
+            coordinator.result = nil
         }
     }
        
     public var wrappedValue: Result<[ResultType], Error> {
-        do {
-            return try .success(fetchedResultsController.results)
-        } catch {
-            return .failure(error)
-        }
+        coordinator.result
     }
     
     public func update() {
-        if fetchedResultsController.fetchDescriptor == nil {
-            fetchedResultsController.fetchDescriptor = initialFetchDescriptor
+        if coordinator.fetchDescriptor == nil {
+            coordinator.fetchDescriptor = initialFetchDescriptor
         }
-        if fetchedResultsController.modelContext != modelContext {
-            fetchedResultsController.modelContext = modelContext
+        if coordinator.fetchedResultsController?.modelContext != modelContext {
+            coordinator.fetchedResultsController = FetchedResultsController<ResultType>(modelContext: modelContext)
+        }
+    }
+    
+    class Coordinator: ObservableObject, FetchedResultsControllerDelegate {
+       
+        var fetchDescriptor: FetchDescriptor<ResultType>!
+        
+        var fetchedResultsController: FetchedResultsController<ResultType>? {
+            didSet {
+                oldValue?.delegate = nil
+                fetchedResultsController?.delegate = self
+                _result = nil
+            }
+        }
+        
+        func controllerDidChangeContent<T>(_ controller: FetchedResultsController<T>) where T : PersistentModel {
+            result = Result.success(controller.fetchedObjects as? [ResultType] ?? [])
+        }
+        
+        private var _result: Result<[ResultType], Error>?
+        var result: Result<[ResultType], Error>! {
+            get {
+                if _result == nil {
+                    do {
+                        try fetchedResultsController?.performFetch(fetchDescriptor: fetchDescriptor)
+                        _result = Result.success(fetchedResultsController?.fetchedObjects ?? [])
+                    }
+                    catch {
+                        _result = Result.failure(error)
+                    }
+                }
+                return _result!
+            }
+            set {
+                objectWillChange.send()
+                _result = newValue
+            }
         }
     }
 }

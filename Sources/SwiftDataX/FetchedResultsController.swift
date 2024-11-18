@@ -1,31 +1,26 @@
 import Foundation
 import SwiftData
-import SwiftUI
 
-@Observable
+public protocol FetchedResultsControllerDelegate: AnyObject {
+    func controllerWillChangeContent<T>(_ controller: FetchedResultsController<T>)
+    func controllerDidChangeContent<T>(_ controller: FetchedResultsController<T>)
+}
+
+extension FetchedResultsControllerDelegate {
+    func controllerWillChangeContent<T>(_ controller: FetchedResultsController<T>) {}
+    func controllerDidChangeContent<T>(_ controller: FetchedResultsController<T>) {}
+}
+
 public class FetchedResultsController<T: PersistentModel> {
 
-    public var fetchDescriptor: FetchDescriptor<T>! {
-        didSet {
-            // if fetchDescriptor == oldValue { return } // need to wait until they make it Equatable
-            _results = nil
-        }
-    }
+    public private(set) var modelContext: ModelContext
+    public weak var delegate: FetchedResultsControllerDelegate?
+    public private(set) var fetchDescriptor: FetchDescriptor<T>!
+    public private(set) var fetchedObjects: [T]?
     
-    public var modelContext: ModelContext! {
-        didSet {
-            // if modelContext == oldValue { return } // perhaps should be removed, to have same semantics as the current var fetchDescriptor
-            _results = nil
-            NotificationCenter.default.removeObserver(self)
-            if let modelContext {
-                NotificationCenter.default.addObserver(self,
-                                                       selector: #selector(contextModelsChanged),
-                                                       name: ModelContext.didChangeX,
-                                                       object: modelContext)
-            }
-        }
+    init(modelContext: ModelContext) {
+        self.modelContext = modelContext
     }
-    
     
     @objc private func contextModelsChanged(_ notification: Notification) {
         guard let userInfo = notification.userInfo else { return }
@@ -34,20 +29,25 @@ public class FetchedResultsController<T: PersistentModel> {
         for key in ["updated", "inserted", "deleted"] {
             if let set = userInfo[key] as? Set<AnyHashable> {
                 if set.contains(where: { String(describing: $0) == search }) {
-                    _results = nil
+                    delegate?.controllerWillChangeContent(self)
+                    fetchedObjects = try? modelContext.fetch(fetchDescriptor) // currently just refetch, todo optimise
+                    delegate?.controllerDidChangeContent(self)
                     return
                 }
             }
         }
     }
     
-    private(set) var _results: [T]?
-    public var results: [T] {
-        get throws {
-            if _results == nil {
-                _results = try modelContext.fetch(fetchDescriptor)
-            }
-            return _results!
-        }
+    public func performFetch(fetchDescriptor: FetchDescriptor<T>) throws {
+        self.fetchDescriptor = fetchDescriptor
+        NotificationCenter.default.removeObserver(self)
+        fetchedObjects = try modelContext.fetch(fetchDescriptor)
+        NotificationCenter.default.addObserver(self,
+                                               selector: #selector(contextModelsChanged),
+                                               name: ModelContext.didChangeX,
+                                               object: modelContext)
+        
     }
+    
+    
 }
