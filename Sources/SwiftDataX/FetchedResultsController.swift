@@ -38,7 +38,7 @@ public class FetchedResultsController<T: PersistentModel> {
         }
     }
     
-    public func performFetch(fetchDescriptor: FetchDescriptor<T>) throws {
+    public func performFetch(_ fetchDescriptor: FetchDescriptor<T>) throws {
         self.fetchDescriptor = fetchDescriptor
         NotificationCenter.default.removeObserver(self)
         fetchedObjects = try modelContext.fetch(fetchDescriptor)
@@ -48,6 +48,4 @@ public class FetchedResultsController<T: PersistentModel> {
                                                object: modelContext)
         
     }
-    
-    
 }

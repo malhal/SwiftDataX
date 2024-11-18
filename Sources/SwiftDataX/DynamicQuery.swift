@@ -56,7 +56,7 @@
             get {
                 if _result == nil {
                     do {
-                        try fetchedResultsController?.performFetch(fetchDescriptor: fetchDescriptor)
+                        try fetchedResultsController?.performFetch(fetchDescriptor)
                         _result = Result.success(fetchedResultsController?.fetchedObjects ?? [])
                     }
                     catch {
