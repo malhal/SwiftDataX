@@ -35,20 +35,18 @@
         }
     }
     
-    class Coordinator: ObservableObject, FetchedResultsControllerDelegate {
+    class Coordinator: ObservableObject {
        
         var fetchDescriptor: FetchDescriptor<ResultType>!
         
         var fetchedResultsController: FetchedResultsController<ResultType>? {
             didSet {
-                oldValue?.delegate = nil
-                fetchedResultsController?.delegate = self
+                oldValue?.didChangeContent = nil
                 _result = nil
+                fetchedResultsController?.willChangeContent = { [weak self] in
+                    self?.result = nil
+                }
             }
-        }
-        
-        func controllerDidChangeContent<T>(_ controller: FetchedResultsController<T>) where T : PersistentModel {
-            result = Result.success(controller.fetchedObjects as? [ResultType] ?? [])
         }
         
         private var _result: Result<[ResultType], Error>?

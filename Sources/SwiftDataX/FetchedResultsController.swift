@@ -1,22 +1,14 @@
 import Foundation
 import SwiftData
 
-public protocol FetchedResultsControllerDelegate: AnyObject {
-    func controllerWillChangeContent<T>(_ controller: FetchedResultsController<T>)
-    func controllerDidChangeContent<T>(_ controller: FetchedResultsController<T>)
-}
-
-extension FetchedResultsControllerDelegate {
-    func controllerWillChangeContent<T>(_ controller: FetchedResultsController<T>) {}
-    func controllerDidChangeContent<T>(_ controller: FetchedResultsController<T>) {}
-}
-
 public class FetchedResultsController<T: PersistentModel> {
 
     public private(set) var modelContext: ModelContext
-    public weak var delegate: FetchedResultsControllerDelegate?
     public private(set) var fetchDescriptor: FetchDescriptor<T>!
     public private(set) var fetchedObjects: [T]?
+    
+    var willChangeContent: (() -> Void)?
+    var didChangeContent: (() -> Void)?
     
     init(modelContext: ModelContext) {
         self.modelContext = modelContext
@@ -29,9 +21,9 @@ public class FetchedResultsController<T: PersistentModel> {
         for key in ["updated", "inserted", "deleted"] {
             if let set = userInfo[key] as? Set<AnyHashable> {
                 if set.contains(where: { String(describing: $0) == search }) {
-                    delegate?.controllerWillChangeContent(self)
+                    willChangeContent?()
                     fetchedObjects = try? modelContext.fetch(fetchDescriptor) // currently just refetch, todo optimise
-                    delegate?.controllerDidChangeContent(self)
+                    didChangeContent?()
                     return
                 }
             }
