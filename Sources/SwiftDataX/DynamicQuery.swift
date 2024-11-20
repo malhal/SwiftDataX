@@ -4,9 +4,8 @@
 @MainActor @propertyWrapper @preconcurrency public struct DynamicQuery<ResultType>: @preconcurrency DynamicProperty where ResultType: PersistentModel {
     
     @Environment(\.modelContext) private var modelContext
-    @StateObject private var coordinator = Coordinator()
-    
-    private let initialFetchDescriptor: FetchDescriptor<ResultType>
+    @StateObject var coordinator = Coordinator()
+    let initialFetchDescriptor: FetchDescriptor<ResultType>
     
     public init(initialFetchDescriptor: FetchDescriptor<ResultType> = .init()) {
         self.initialFetchDescriptor = initialFetchDescriptor
@@ -14,11 +13,10 @@
     
     public var fetchDescriptor: FetchDescriptor<ResultType> {
         get {
-            coordinator.fetchDescriptor ?? initialFetchDescriptor
+            coordinator.fetchDescriptor
         }
         nonmutating set {
             coordinator.fetchDescriptor = newValue
-            coordinator.result = nil
         }
     }
        
@@ -30,44 +28,63 @@
         if coordinator.fetchDescriptor == nil {
             coordinator.fetchDescriptor = initialFetchDescriptor
         }
-        if coordinator.fetchedResultsController?.modelContext != modelContext {
-            coordinator.fetchedResultsController = FetchedResultsController<ResultType>(modelContext: modelContext)
+        if coordinator.modelContext != modelContext {
+            coordinator.modelContext = modelContext
         }
     }
     
-    class Coordinator: ObservableObject, FetchedResultsControllerDelegate {
-       
-        var fetchDescriptor: FetchDescriptor<ResultType>!
+    @Observable
+    @MainActor class Coordinator: ObservableObject, @preconcurrency FetchedResultsControllerDelegate {
         
-        var fetchedResultsController: FetchedResultsController<ResultType>? {
+        @ObservationIgnored
+        var modelContext: ModelContext! {
+            didSet {
+                _fetchedResultsController = nil
+            }
+        }
+        
+        @ObservationIgnored
+        var fetchDescriptor: FetchDescriptor<ResultType>! {
+            didSet {
+                _fetchedResultsController = nil
+            }
+        }
+        
+        @ObservationIgnored
+        var _fetchedResultsController: FetchedResultsController<ResultType>? {
             didSet {
                 oldValue?.delegate = nil
-                fetchedResultsController?.delegate = self
+                _fetchedResultsController?.delegate = self
                 _result = nil
+            }
+        }
+        var fetchedResultsController: FetchedResultsController<ResultType>! {
+            get {
+                if _fetchedResultsController == nil {
+                    _fetchedResultsController = FetchedResultsController<ResultType>(modelContext: modelContext, fetchDescriptor: fetchDescriptor)
+                }
+                return _fetchedResultsController!
             }
         }
         
         func controllerDidChangeContent<T>(_ controller: FetchedResultsController<T>) where T : PersistentModel {
-            result = Result.success(controller.fetchedObjects as? [ResultType] ?? [])
+            _result = Result.success(controller.fetchedObjects as! [ResultType])
         }
         
-        private var _result: Result<[ResultType], Error>?
-        var result: Result<[ResultType], Error>! {
+        var _result: Result<[ResultType], Error>?
+        var result: Result<[ResultType], Error> {
             get {
                 if _result == nil {
                     do {
-                        try fetchedResultsController?.performFetch(fetchDescriptor)
-                        _result = Result.success(fetchedResultsController?.fetchedObjects ?? [])
+                        let frc = fetchedResultsController!
+                        try frc.performFetch()
+                        _result = Result.success(frc.fetchedObjects ?? [])
                     }
                     catch {
                         _result = Result.failure(error)
                     }
                 }
                 return _result!
-            }
-            set {
-                objectWillChange.send()
-                _result = newValue
             }
         }
     }

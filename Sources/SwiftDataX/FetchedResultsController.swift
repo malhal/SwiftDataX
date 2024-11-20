@@ -13,13 +13,14 @@ extension FetchedResultsControllerDelegate {
 
 public class FetchedResultsController<T: PersistentModel> {
 
-    public private(set) var modelContext: ModelContext
+    public let modelContext: ModelContext
     public weak var delegate: FetchedResultsControllerDelegate?
-    public private(set) var fetchDescriptor: FetchDescriptor<T>!
+    public let fetchDescriptor: FetchDescriptor<T>!
     public private(set) var fetchedObjects: [T]?
     
-    init(modelContext: ModelContext) {
+    init(modelContext: ModelContext, fetchDescriptor: FetchDescriptor<T>) {
         self.modelContext = modelContext
+        self.fetchDescriptor = fetchDescriptor
     }
     
     @objc private func contextModelsChanged(_ notification: Notification) {
@@ -30,7 +31,7 @@ public class FetchedResultsController<T: PersistentModel> {
             if let set = userInfo[key] as? Set<AnyHashable> {
                 if set.contains(where: { String(describing: $0) == search }) {
                     delegate?.controllerWillChangeContent(self)
-                    fetchedObjects = try? modelContext.fetch(fetchDescriptor) // currently just refetch, todo optimise
+                    fetchedObjects = try? modelContext.fetch(fetchDescriptor) // todo optimise, currently just refetch
                     delegate?.controllerDidChangeContent(self)
                     return
                 }
@@ -38,14 +39,19 @@ public class FetchedResultsController<T: PersistentModel> {
         }
     }
     
-    public func performFetch(_ fetchDescriptor: FetchDescriptor<T>) throws {
-        self.fetchDescriptor = fetchDescriptor
+    public func performFetch() throws {
         NotificationCenter.default.removeObserver(self)
         fetchedObjects = try modelContext.fetch(fetchDescriptor)
+        if delegate == nil { return }
         NotificationCenter.default.addObserver(self,
                                                selector: #selector(contextModelsChanged),
                                                name: ModelContext.didChangeX,
                                                object: modelContext)
         
+    }
+    
+    deinit {
+        //print("deinit")
+        NotificationCenter.default.removeObserver(self)
     }
 }
