@@ -58,7 +58,7 @@
                 _result = nil
             }
         }
-        var fetchedResultsController: FetchedResultsController<ResultType>! {
+        var fetchedResultsController: FetchedResultsController<ResultType> {
             get {
                 if _fetchedResultsController == nil {
                     _fetchedResultsController = FetchedResultsController<ResultType>(modelContext: modelContext, fetchDescriptor: fetchDescriptor)
@@ -76,7 +76,7 @@
             get {
                 if _result == nil {
                     do {
-                        let frc = fetchedResultsController!
+                        let frc = fetchedResultsController
                         try frc.performFetch()
                         _result = Result.success(frc.fetchedObjects ?? [])
                     }
