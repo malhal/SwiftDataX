@@ -66,17 +66,14 @@
                 cachedResult = nil
             }
             
-            let result: Result<[ResultType], Error>
             do {
                 try frc.performFetch()
-                result = Result.success(frc.fetchedModels ?? [])
+                cachedResult = Result.success(frc.fetchedModels ?? [])
             }
             catch {
-                result = Result.failure(error)
+                cachedResult = Result.failure(error)
             }
-            cachedResult = result
-            let _ = cachedResult // need to call the getter for the Observable depdendency to be configured and for body to be called after controllerDidChangeContent
-            return result
+            return cachedResult!
         }
     }
 }
