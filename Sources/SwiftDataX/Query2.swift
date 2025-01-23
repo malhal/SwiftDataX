@@ -6,12 +6,12 @@
     @Environment(\.modelContext) private var modelContext
     @StateObject var controller = Query2Controller()
     //let initialFetchDescriptor: FetchDescriptor<ResultType>
-    let filter: Predicate<ResultType>
+    let filter: Predicate<ResultType>?
     let sort: [SortDescriptor<ResultType>]
 //    public init(initialFetchDescriptor: FetchDescriptor<ResultType> = .init()) {
 //        self.initialFetchDescriptor = initialFetchDescriptor
 //    }
-    public init(filter: Predicate<ResultType>, sort: [SortDescriptor<ResultType>]) {
+    public init(filter: Predicate<ResultType>? = nil, sort: [SortDescriptor<ResultType>]) {
         self.filter = filter
         self.sort = sort
     }
@@ -37,12 +37,12 @@
         }
         
         var cachedResult: Result<[ResultType], Error>?
-        func result(context: ModelContext, filter: Predicate<ResultType>, sort: [SortDescriptor<ResultType>]) -> Result<[ResultType], Error> {
+        func result(context: ModelContext, filter: Predicate<ResultType>?, sort: [SortDescriptor<ResultType>]) -> Result<[ResultType], Error> {
             
             var fetchDescriptor = fetchedModelsController?.fetchDescriptor ?? FetchDescriptor<ResultType>()
             
             // predicate is not Equatable so need to use its description which hopefully has everything in it.
-            if fetchedModelsController?.fetchDescriptor.predicate?.description != filter.description {
+            if fetchedModelsController?.fetchDescriptor.predicate?.description != filter?.description {
                 fetchDescriptor.predicate = filter
                 cachedResult = nil
             }
