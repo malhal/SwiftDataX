@@ -7,11 +7,11 @@
 import SwiftData
 import SwiftUI
 
-public struct Query2View<Element, Content>: View where Element: PersistentModel, Content: View {
-    @Query2 var result: Result<[Element], Error>
-    let content: (Result<[Element], Error>) -> Content
+public struct Query2View<Model, Content>: View where Model: PersistentModel, Content: View {
+    @Query2 var result: Result<[Model], Error>
+    let content: (Result<[Model], Error>) -> Content
     
-    public init(query: Query2<Element>, @ViewBuilder content: @escaping (Result<[Element], Error>) -> Content) {
+    public init(query: Query2<Model>, @ViewBuilder content: @escaping (Result<[Model], Error>) -> Content) {
         self.content = content
         self._result = query
     }

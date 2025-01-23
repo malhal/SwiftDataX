@@ -7,16 +7,16 @@
 import SwiftData
 import SwiftUI
 
-public struct QueryView<Element, Content>: View where Element: PersistentModel, Content: View {
-    @Query var elements: [Element]
-    let content: ([Element]) -> Content
+public struct QueryView<Model, Content>: View where Model: PersistentModel, Content: View {
+    @Query var models: [Model]
+    let content: ([Model]) -> Content
     
-    public init(query: Query<Element, [Element]>, @ViewBuilder content: @escaping ([Element]) -> Content) {
+    public init(query: Query<Model, [Model]>, @ViewBuilder content: @escaping ([Model]) -> Content) {
         self.content = content
-        self._elements = query
+        self._models = query
     }
     
     public var body: some View {
-        content(elements)
+        content(models)
     }
 }
