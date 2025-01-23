@@ -6,7 +6,7 @@ import PackageDescription
 let package = Package(
     name: "SwiftDataX",
     platforms: [
-        .iOS(.v17),
+        .iOS(.v18),
         .macOS(.v10_15)
     ],
     products: [

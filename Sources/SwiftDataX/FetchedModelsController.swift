@@ -1,22 +1,22 @@
 import Foundation
 import SwiftData
 
-public protocol FetchedResultsControllerDelegate: AnyObject {
-    func controllerWillChangeContent<T>(_ controller: FetchedResultsController<T>)
-    func controllerDidChangeContent<T>(_ controller: FetchedResultsController<T>)
+public protocol FetchedModelsControllerDelegate: AnyObject {
+    func controllerWillChangeContent<T>(_ controller: FetchedModelsController<T>)
+    func controllerDidChangeContent<T>(_ controller: FetchedModelsController<T>)
 }
 
-extension FetchedResultsControllerDelegate {
-    func controllerWillChangeContent<T>(_ controller: FetchedResultsController<T>) {}
-    func controllerDidChangeContent<T>(_ controller: FetchedResultsController<T>) {}
+extension FetchedModelsControllerDelegate {
+    func controllerWillChangeContent<T>(_ controller: FetchedModelsController<T>) {}
+    func controllerDidChangeContent<T>(_ controller: FetchedModelsController<T>) {}
 }
 
-public class FetchedResultsController<T: PersistentModel> {
+public class FetchedModelsController<T: PersistentModel> {
 
     public let modelContext: ModelContext
-    public weak var delegate: FetchedResultsControllerDelegate?
+    public weak var delegate: FetchedModelsControllerDelegate?
     public let fetchDescriptor: FetchDescriptor<T>!
-    public private(set) var fetchedObjects: [T]?
+    public private(set) var fetchedModels: [T]?
     
     init(modelContext: ModelContext, fetchDescriptor: FetchDescriptor<T>) {
         self.modelContext = modelContext
@@ -31,7 +31,7 @@ public class FetchedResultsController<T: PersistentModel> {
             if let set = userInfo[key] as? Set<AnyHashable> {
                 if set.contains(where: { String(describing: $0) == search }) {
                     delegate?.controllerWillChangeContent(self)
-                    fetchedObjects = try? modelContext.fetch(fetchDescriptor) // todo optimise, currently just refetch
+                    fetchedModels = try? modelContext.fetch(fetchDescriptor) // todo optimise, currently just refetch
                     delegate?.controllerDidChangeContent(self)
                     return
                 }
@@ -41,7 +41,7 @@ public class FetchedResultsController<T: PersistentModel> {
     
     public func performFetch() throws {
         NotificationCenter.default.removeObserver(self)
-        fetchedObjects = try modelContext.fetch(fetchDescriptor)
+        fetchedModels = try modelContext.fetch(fetchDescriptor)
         if delegate == nil { return }
         NotificationCenter.default.addObserver(self,
                                                selector: #selector(contextModelsChanged),
