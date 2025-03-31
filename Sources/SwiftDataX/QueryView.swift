@@ -1,9 +1,3 @@
-//
-//  QueryView.swift
-//  SwiftDataX
-//
-//  Created by Malcolm Hall on 23/01/2025.
-//
 import SwiftData
 import SwiftUI
 

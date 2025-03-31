@@ -7,15 +7,15 @@ public protocol FetchedModelsControllerDelegate: AnyObject {
 }
 
 extension FetchedModelsControllerDelegate {
-    func controllerWillChangeContent<T>(_ controller: FetchedModelsController<T>) {}
-    func controllerDidChangeContent<T>(_ controller: FetchedModelsController<T>) {}
+    public func controllerWillChangeContent<T>(_ controller: FetchedModelsController<T>) {}
+    public func controllerDidChangeContent<T>(_ controller: FetchedModelsController<T>) {}
 }
 
 public class FetchedModelsController<T: PersistentModel> {
 
-    public let modelContext: ModelContext
+    public var modelContext: ModelContext
     public weak var delegate: FetchedModelsControllerDelegate?
-    public let fetchDescriptor: FetchDescriptor<T>!
+    public var fetchDescriptor: FetchDescriptor<T>!
     public private(set) var fetchedModels: [T]?
     
     init(modelContext: ModelContext, fetchDescriptor: FetchDescriptor<T>) {
