@@ -1,5 +1,6 @@
 import Foundation
 import SwiftData
+import CoreData
 
 public protocol FetchedModelsControllerDelegate: AnyObject {
     func controllerWillChangeContent<T>(_ controller: FetchedModelsController<T>)
@@ -17,6 +18,7 @@ public class FetchedModelsController<T: PersistentModel> {
     public weak var delegate: FetchedModelsControllerDelegate?
     public var fetchDescriptor: FetchDescriptor<T>!
     public private(set) var fetchedModels: [T]?
+    private var remoteChangeObserver: NSObjectProtocol?
     
     init(modelContext: ModelContext, fetchDescriptor: FetchDescriptor<T>) {
         self.modelContext = modelContext
@@ -30,17 +32,34 @@ public class FetchedModelsController<T: PersistentModel> {
         for key in ["updated", "inserted", "deleted"] {
             if let set = userInfo[key] as? Set<AnyHashable> {
                 if set.contains(where: { String(describing: $0) == search }) {
-                    delegate?.controllerWillChangeContent(self)
-                    fetchedModels = try? modelContext.fetch(fetchDescriptor) // todo optimise, currently just refetch
-                    delegate?.controllerDidChangeContent(self)
+                    changed()
                     return
                 }
             }
         }
     }
     
+    @objc private func remoteChange(_ notification: Notification) {
+        guard let userInfo = notification.userInfo else { return }
+        if let storeURL = userInfo[NSPersistentStoreURLKey] as? URL {
+            if modelContext.container.configurations.contains(where: { $0.url == storeURL }) {
+                changed()
+            }
+        }
+    }
+    
+    func changed() {
+        delegate?.controllerWillChangeContent(self)
+        fetchedModels = try? modelContext.fetch(fetchDescriptor) // todo optimise, currently just refetch
+        delegate?.controllerDidChangeContent(self)
+    }
+    
     public func performFetch() throws {
         NotificationCenter.default.removeObserver(self)
+        if let observer = remoteChangeObserver {
+            NotificationCenter.default.removeObserver(observer)
+        }
+        
         fetchedModels = try modelContext.fetch(fetchDescriptor)
         if delegate == nil { return }
         NotificationCenter.default.addObserver(self,
@@ -48,10 +67,20 @@ public class FetchedModelsController<T: PersistentModel> {
                                                name: ModelContext.didChangeX,
                                                object: modelContext)
         
+        remoteChangeObserver = NotificationCenter.default.addObserver(
+            forName: .NSPersistentStoreRemoteChange,
+            object: nil,
+            queue: .main
+        ) { [weak self] notification in
+            self?.remoteChange(notification)
+        }
     }
     
     deinit {
         //print("deinit")
         NotificationCenter.default.removeObserver(self)
+        if let observer = remoteChangeObserver {
+            NotificationCenter.default.removeObserver(observer)
+        }
     }
 }

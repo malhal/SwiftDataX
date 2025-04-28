@@ -15,6 +15,10 @@ import SwiftUI
         self.sort = sort
         self.animation = animation
     }
+    
+    public init<Value>(filter: Predicate<ResultType>? = nil, sort keyPath: KeyPath<ResultType, Value> & Sendable, order: SortOrder = .forward, animation: Animation? = nil) where Value : Comparable {
+        self.init(filter: filter, sort:  [SortDescriptor<ResultType>(keyPath, order: order)], animation: animation)
+    }
        
     public var wrappedValue: Result<[ResultType], Error> {
         controller.result(context: modelContext, filter: filter, sort: sort, animation: animation)
