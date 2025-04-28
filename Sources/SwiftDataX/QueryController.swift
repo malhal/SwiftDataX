@@ -6,6 +6,9 @@ import SwiftUI
 public class QueryController<ResultType: PersistentModel>: ObservableObject, @preconcurrency FetchedModelsControllerDelegate {
     
     @ObservationIgnored
+    var animation: Animation?
+    
+    @ObservationIgnored
     private var fetchedModelsController: FetchedModelsController<ResultType>? {
         didSet {
             oldValue?.delegate = nil
@@ -16,11 +19,15 @@ public class QueryController<ResultType: PersistentModel>: ObservableObject, @pr
     public init(for: ResultType.Type) { }
     
     public func controllerDidChangeContent<T>(_ controller: FetchedModelsController<T>) where T : PersistentModel {
-        cachedResult = Result.success(controller.fetchedModels as! [ResultType])
+        withAnimation(animation) {
+            cachedResult = Result.success(controller.fetchedModels as! [ResultType])
+        }
     }
     
     var cachedResult: Result<[ResultType], Error>?
-    public func result(context: ModelContext, filter: Predicate<ResultType>?, sort: [SortDescriptor<ResultType>]) -> Result<[ResultType], Error> {
+    public func result(context: ModelContext, filter: Predicate<ResultType>? = nil, sort: [SortDescriptor<ResultType>], animation: Animation? = nil) -> Result<[ResultType], Error> {
+        
+        self.animation = animation
         
         let frc: FetchedModelsController<ResultType>
         if let fetchedModelsController {

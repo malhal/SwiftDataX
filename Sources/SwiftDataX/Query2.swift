@@ -8,13 +8,15 @@ import SwiftUI
     
     let filter: Predicate<ResultType>?
     let sort: [SortDescriptor<ResultType>]
+    let animation: Animation?
 
-    public init(filter: Predicate<ResultType>? = nil, sort: [SortDescriptor<ResultType>]) {
+    public init(filter: Predicate<ResultType>? = nil, sort: [SortDescriptor<ResultType>], animation: Animation? = nil) {
         self.filter = filter
         self.sort = sort
+        self.animation = animation
     }
        
     public var wrappedValue: Result<[ResultType], Error> {
-        controller.result(context: modelContext, filter: filter, sort: sort)
+        controller.result(context: modelContext, filter: filter, sort: sort, animation: animation)
     }
 }
