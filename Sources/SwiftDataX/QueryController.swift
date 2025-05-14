@@ -1,14 +1,11 @@
 import SwiftData
 import SwiftUI
 
-@Observable
 @MainActor
 public class QueryController<ResultType: PersistentModel>: ObservableObject, @preconcurrency FetchedModelsControllerDelegate {
     
-    @ObservationIgnored
     var animation: Animation?
     
-    @ObservationIgnored
     private var fetchedModelsController: FetchedModelsController<ResultType>? {
         didSet {
             oldValue?.delegate = nil
@@ -16,55 +13,48 @@ public class QueryController<ResultType: PersistentModel>: ObservableObject, @pr
         }
     }
     
-    public init(for: ResultType.Type) { }
+    public init(for result: ResultType.Type) { }
     
     public func controllerDidChangeContent<T>(_ controller: FetchedModelsController<T>) where T : PersistentModel {
+        cachedResult = controller.fetchedModels as? [ResultType] ?? []
         withAnimation(animation) {
-            cachedResult = Result.success(controller.fetchedModels as! [ResultType])
+            objectWillChange.send()
         }
     }
     
-    var cachedResult: Result<[ResultType], Error>?
-    public func result(context: ModelContext, filter: Predicate<ResultType>? = nil, sort: [SortDescriptor<ResultType>], animation: Animation? = nil) -> Result<[ResultType], Error> {
+    var cachedResult: [ResultType]?
+    public func result(context: ModelContext, filter: Predicate<ResultType>? = nil, sort: [SortDescriptor<ResultType>], animation: Animation? = .default) throws -> [ResultType] {
         
         self.animation = animation
         
         let frc: FetchedModelsController<ResultType>
-        if let fetchedModelsController {
+        if let fetchedModelsController, fetchedModelsController.modelContext == context {
             frc = fetchedModelsController
             
             // predicate is not Equatable so need to use its description which hopefully has everything in it.
-            if frc.fetchDescriptor.predicate?.description != filter?.description {
-                frc.fetchDescriptor.predicate = filter
+            if frc.predicate?.description != filter?.description {
+                frc.predicate = filter
                 cachedResult = nil
             }
             
-            if frc.fetchDescriptor.sortBy != sort {
-                frc.fetchDescriptor.sortBy = sort
+            if frc.sortBy != sort {
+                frc.sortBy = sort
                 cachedResult = nil
-            }
-            
-            if frc.modelContext != context {
-                frc.modelContext = context
-                cachedResult = nil
-            }
-            
-            if let cachedResult {
-                return cachedResult
             }
         }
         else {
-            frc = FetchedModelsController<ResultType>(modelContext: context, fetchDescriptor: FetchDescriptor<ResultType>(predicate: filter, sortBy: sort))
+            frc = FetchedModelsController<ResultType>(modelContext: context, predicate: filter, sortBy: sort)
             fetchedModelsController = frc
+            cachedResult = nil
         }
         
-        do {
-            try frc.performFetch()
-            cachedResult = Result.success(frc.fetchedModels ?? [])
+        if let cachedResult {
+            return cachedResult
         }
-        catch {
-            cachedResult = Result.failure(error)
-        }
-        return cachedResult!
+        
+        try frc.performFetch()
+        let result = frc.fetchedModels ?? []
+        cachedResult = result
+        return result
     }
 }

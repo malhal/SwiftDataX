@@ -21,6 +21,6 @@ import SwiftUI
     }
        
     public var wrappedValue: Result<[ResultType], Error> {
-        controller.result(context: modelContext, filter: filter, sort: sort, animation: animation)
+        Result { try controller.result(context: modelContext, filter: filter, sort: sort, animation: animation) }
     }
 }

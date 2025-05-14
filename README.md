@@ -32,11 +32,11 @@ struct DetailView: View {
     
     var result: Result<[SubItem], Error> {
         // body is called if a change is detected in the context that affects these results
-        queryController.result(context: modelContext, filter: filter, sort: [SortDescriptor(\.timestamp, order: .reverse)])
+        Result { queryController.result(context: modelContext, filter: filter, sort: [SortDescriptor(\.timestamp, order: .reverse)]) }
     }
 
     var body: some View {
-        VStack {
+        ZStack { // just to allow the switch result to have a toolbar
             switch(result) {
                 case .success(let subItems):
                     List {
