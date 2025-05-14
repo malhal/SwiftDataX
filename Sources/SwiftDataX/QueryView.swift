@@ -1,6 +1,7 @@
 import SwiftData
 import SwiftUI
 
+// Just for convenience instead of creating your own child custom View
 public struct QueryView<Model, Content>: View where Model: PersistentModel, Content: View {
     @Query var models: [Model]
     
