@@ -1,4 +1,4 @@
-// swift-tools-version: 6.0
+// swift-tools-version: 6.4
 // The swift-tools-version declares the minimum version of Swift required to build this package.
 
 import PackageDescription
@@ -6,7 +6,7 @@ import PackageDescription
 let package = Package(
     name: "SwiftDataX",
     platforms: [
-        .iOS(.v18),
+        .iOS(.v27),
         .macOS("14.4") // predicate.description only available since 14.4
     ],
     products: [

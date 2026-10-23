@@ -1,79 +1,145 @@
 # SwiftDataX
 
-SwiftDataX brings extended features to SwiftData like `FetchedModelsController` which is like `NSFetchedResultsController` and a `QueryController` that enables dynamic predicate and sort descriptors. It also has `@Query2` an open source implementation of `@Query` which might give you an idea of how it might be implemented. Although you should usually make your own child `QueryView` where you compute a query and pass in as a param, a `QueryView` convenience wrapper is provided to use `@Query` with for dynamic queries. `@Query2` differs from `@Query` that it uses Swift's built-in `Result` type which is an enum containing either the results or the error which I prefer compared with `@Query`'s implementation of a distinct `var fetchError`. The `animation` defaults to `.default` instead of `.none` so animations occur when ever the results change due to an insert, delete or update.
+SwiftDataX provides a high-performance, closure-driven query architecture for SwiftData centered around `FetchedModelsController`—a SwiftData equivalent to Core Data's `NSFetchedResultsController`. It replaces traditional property wrappers and rigid query components with a clean view modifier approach (`.query(...)`) that brings explicit error handling, precise state tracking, and seamless animation preservation directly into your views.
 
-* `QueryView`: a convenience wrapper for `@Query` for enabling dynamic queries but you might be better off just making your own custom child `View`.
-* `@Query2`: open source version of `@Query` powered by an internal `QueryController`.
-* `@Query2` and `QueryController` use a Swift `Result` type to represent either valid results or an error as one value.
-* `FetchedModelsController`: a fetch controller for SwiftData similar to Core Data's `NSFetchedResultsController`.
+---
 
-Note: It currently uses a private notification for model context changes which could be a problem for app review but probably not since it is just a string and not a private method.
+## Why This Architecture?
 
-Here is an example of how `QueryController` can be used to fetch detail items with dynamic sort, updating the predicate whenever the parent item changes:
+### 1. View Modifier vs. Property Wrapper (Why Avoid `@Query`?)
+
+Standard property wrappers like `@Query` enforce compile-time constraints that make dynamic queries, closures, and custom error UI difficult to structure gracefully.
+
+* **Lifecycle & Scoping**: The `.query(...)` view modifier acts as a natural boundary. It scopes the `QueryObserver` lifecycle tightly to the view's appearance and passes strongly-typed results (`[ResultType]`) directly into a clean callback.
+* **Explicit Error Boundaries**: Traditional property wrappers cannot throw or safely expose database fetch exceptions to the view layer. This design intercepts errors explicitly via an `onError:` callback, keeping your success and error paths cleanly separated.
+
+### 2. Two-Tier Lifecycle Management
+
+* **Tier 1 (Context Switch / Re-init)**: Automatically tears down and re-initializes the `FetchedModelsController` when the underlying `ModelContext` changes or a new configuration blueprint is injected.
+* **Tier 2 (Reactivity)**: The internal `QueryObserver` listens to changes via `FetchedModelsControllerDelegate`, bumping a reactive version counter to trigger clean, atomic view updates when inserts, deletes, or modifications happen.
+
+---
+
+## Core Components
+
+* **`FetchDescriptorRepresentable`**: A protocol defining a lightweight, equatable, and sendable configuration blueprint (`makeFetchDescriptor()`) that builds a SwiftData `FetchDescriptor`.
+> **Why a factory method (`makeFetchDescriptor()`)?**
+> Although the blueprint itself is a value type and explicitly conforms to `Equatable`, Swift's `#Predicate` closures are not `Equatable` and cannot be diffed directly by the compiler. If we passed predicates straight into an equality check, the system would have no way to compare them, causing the query to re-execute redundantly on every single view initialization.
+> By wrapping the raw parameters that drive the predicate inside this custom `Equatable` type and generating the `FetchDescriptor` fresh via `makeFetchDescriptor()` only when those parameters change, we effectively give the non-equatable predicate an equatable guardian. This ensures fetches only run when underlying data parameters actually mutate.
+
+
+* **`QueryModifier`**: A custom `ViewModifier` managing the controller lifecycle, model context triggers, and error interception.
+* **`QueryObserver`**: An `@Observable` helper acting as the delegate for `FetchedModelsController`, bumping revisions reactively.
+* **`FetchedModelsController`**: The underlying engine bridging SwiftData models to delegate-driven change notifications.
+
+---
+
+## Animation & Transaction Behavior
+
+### Uncommitted Changes & `notifyAndProcessPendingChanges()`
+
+Because SwiftData mutations occur asynchronously by default, uncommitted in-memory inserts or deletions can close their `withAnimation` transaction block before the `FetchedModelsController` delegate fires.
+
+To ensure uncommitted local writes animate smoothly into view during user actions, call `modelContext.notifyAndProcessPendingChanges()` inside your animation block. This triggers the custom `willPerformChanges` notification required by the observation engine to process pending changes immediately:
+
+```swift
+private func addItem() {
+    let newItem = Item(timestamp: Date())
+    modelContext.insert(newItem)
+    selection = newItem
+
+    withAnimation {
+        modelContext.notifyAndProcessPendingChanges()
+    }
+}
 
 ```
+
+---
+
+## Usage Example
+
+Here is how cleanly you can drive a dynamic query with sort controls, selection reconciliation, a toolbar action, and explicit error handling using the `.query(_:handleResults:onError:)` modifier:
+
+```swift
 import SwiftUI
 import SwiftDataX
 
-struct DetailView: View {
+struct ItemListView: View {
+    @State private var ascending = true
+    @State private var items: [Item] = []
+    @State private var selection: Item?
+    @State private var fetchError: Error?
+    @Environment(\.modelContext) private var modelContext
     
-    let item: Item // body called when this item changes
-    
-    struct QueryView: View {
-        let query: Query2<SubItem>
-        var result: Result<[SubItem], Error> {
-             query.wrappedValue
+    // Define a domain-specific query configuration
+    struct SortedItems: FetchDescriptorRepresentable {
+        let ascending: Bool
+         
+        func makeFetchDescriptor() -> FetchDescriptor<Item> {
+            var descriptor = FetchDescriptor<Item>()
+            descriptor.sortBy = [SortDescriptor(\.timestamp, order: ascending ? .forward : .reverse)]
+            return descriptor
         }
-        @Environment(\.modelContext) private var modelContext
-        
-        var body: some View {
-            switch(query.result) {
-                case .success(let subItems):
-                    List {
-                        ForEach(subItems) { subItem in
-                            Text(subItem.timestamp, format: Date.FormatStyle(date: .numeric, time: .standard))
-                        }
-                        .onDelete { offsets in
-                            deleteItems(offsets: offsets, subItems: subItems)
+    }
+    
+    var body: some View {
+        NavigationStack {
+            VStack {
+                HStack {
+                    Button(ascending ? "Ascending" : "Descending") {
+                        withAnimation {
+                            ascending.toggle()
                         }
                     }
-                    .animation(.default, value: subItems)
-                case .failure(let error):
-                    Text(error.localizedDescription)
+                    Spacer()
+                    Text("\(items.count) items")
+                }
+                .padding()
+                 
+                List(items, selection: $selection) { item in
+                    Text(item.timestamp, format: Date.FormatStyle(date: .numeric, time: .standard))
+                }
             }
-        }
-        
-        private func deleteItems(offsets: IndexSet, subItems: [SubItem]) {
-            ...
-        }
-    }
-
-    var filter: Predicate<SubItem> {
-        let id = item.persistentModelID
-        return #Predicate<SubItem> { subItem in
-            subItem.item?.persistentModelID == id
-        }
-    }
-    
-    @State private var ascending = false
-    
-    var sort: [SortDescriptor<SubItem>] {
-        [SortDescriptor(\SubItem.timestamp, order: ascending ? .forward : .reverse)]
-    }
-
-    var body: some View {
-        QueryView(query: Query2(filter: filter, sort: sort))
-        .toolbar {
-            ToolbarItem {
-                Button(ascending ? "Desc" : "Asc") {
-                    withAnimation {
-                        ascending.toggle()
+            .toolbar {
+#if os(iOS)
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    EditButton()
+                }
+#endif
+                ToolbarItem {
+                    Button(action: addItem) {
+                        Label("Add Item", systemImage: "plus")
                     }
                 }
             }
+            .query(SortedItems(ascending: ascending)) { newItems in
+                // Handle automatic selection fallback if the selected item was deleted
+                if let selected = selection, !newItems.contains(where: { $0 == selected }) {
+                    let oldIndex = items.firstIndex(where: { $0 == selected }) ?? 0
+                    let safeIndex = min(oldIndex, max(0, newItems.count - 1))
+                    selection = newItems.isEmpty ? nil : newItems[safeIndex]
+                }
+                
+                withAnimation {
+                    items = newItems
+                }
+            } onError: { error in
+                fetchError = error
+                print("Query failed: \(error)")
+            }
         }
     }
     
-    ...
+    private func addItem() {
+        let newItem = Item(timestamp: Date())
+        modelContext.insert(newItem)
+        selection = newItem
+        
+        withAnimation {
+            modelContext.notifyAndProcessPendingChanges()
+        }
+    }
 }
+
 ```
