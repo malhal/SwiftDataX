@@ -1,55 +1,46 @@
 # SwiftDataX
 
-SwiftDataX provides a high-performance, closure-driven query architecture for SwiftData centered around `FetchedModelsController`—a SwiftData equivalent to Core Data's `NSFetchedResultsController`. It replaces traditional property wrappers and rigid query components with a clean view modifier approach (`.query(...)`) that brings explicit error handling, precise state tracking, and seamless animation preservation directly into your views.
+`SwiftDataX` provides a high-performance, closure-driven query architecture for SwiftData centered around `FetchedModelsController`—a SwiftData equivalent to Core Data's `NSFetchedResultsController`. It replaces traditional rigid query property wrappers with a flexible view modifier and property wrapper combination that supports complex `FetchDescriptor` configurations, modular predicates, explicit error handling, and seamless animation preservation.
 
 ---
 
 ## Why This Architecture?
 
-### 1. View Modifier vs. Property Wrapper (Why Avoid `@Query`?)
+### 1. Solving the Predicate Comparison Problem
 
-Standard property wrappers like `@Query` enforce compile-time constraints that make dynamic queries, closures, and custom error UI difficult to structure gracefully.
+SwiftData's native `FetchDescriptor` is a value type, but its `.predicate` property relies on runtime `#Predicate` closures that **cannot be compared for equality (`Equatable`) by the compiler**.
 
-* **Lifecycle & Scoping**: The `.query(...)` view modifier acts as a natural boundary. It scopes the `QueryObserver` lifecycle tightly to the view's appearance and passes strongly-typed results (`[ResultType]`) directly into a clean callback.
-* **Explicit Error Boundaries**: Traditional property wrappers cannot throw or safely expose database fetch exceptions to the view layer. This design intercepts errors explicitly via an `onError:` callback, keeping your success and error paths cleanly separated.
+If you attempt to diff raw descriptors directly, the system has no way to evaluate whether two predicates match, forcing queries to re-execute redundantly on every single view body evaluation. `SwiftDataX` introduces an **Equatable Guardian** pattern via `PredicateRepresentable`:
 
-### 2. Two-Tier Lifecycle Management
+* **The Core Descriptor**: Handles standard parameters like sort descriptors, limits, offsets, and prefetching keys natively.
+* **The Predicate Representable**: Encapsulates the predicate inside a lightweight, equatable configuration type.
+* **The Result**: The controller only tears down and re-fetches when underlying query parameters or predicate configurations actually mutate.
 
-* **Tier 1 (Context Switch / Re-init)**: Automatically tears down and re-initializes the `FetchedModelsController` when the underlying `ModelContext` changes or a new configuration blueprint is injected.
-* **Tier 2 (Reactivity)**: The internal `QueryObserver` listens to changes via `FetchedModelsControllerDelegate`, bumping a reactive version counter to trigger clean, atomic view updates when inserts, deletes, or modifications happen.
+### 2. Explicit Error Boundaries & Fine-Grained Control
+
+Unlike standard SwiftUI property wrappers that fail silently or lack error interception, `Query2` exposes database fetch exceptions directly to the view layer via its projected configuration state (`projectedValue`), keeping your success and error paths cleanly separated.
 
 ---
 
 ## Core Components
 
-* **`FetchDescriptorRepresentable`**: A protocol defining a lightweight, equatable, and sendable configuration blueprint (`makeFetchDescriptor()`) that builds a SwiftData `FetchDescriptor`.
-> **Why a factory method (`makeFetchDescriptor()`)?**
-> Although the blueprint itself is a value type and explicitly conforms to `Equatable`, Swift's `#Predicate` closures are not `Equatable` and cannot be diffed directly by the compiler. If we passed predicates straight into an equality check, the system would have no way to compare them, causing the query to re-execute redundantly on every single view initialization.
-> By wrapping the raw parameters that drive the predicate inside this custom `Equatable` type and generating the `FetchDescriptor` fresh via `makeFetchDescriptor()` only when those parameters change, we effectively give the non-equatable predicate an equatable guardian. This ensures fetches only run when underlying data parameters actually mutate.
-
-
-* **`QueryModifier`**: A custom `ViewModifier` managing the controller lifecycle, model context triggers, and error interception.
-* **`QueryObserver`**: An `@Observable` helper acting as the delegate for `FetchedModelsController`, bumping revisions reactively.
+* **`PredicateRepresentable`**: A protocol defining a lightweight, equatable, and sendable configuration blueprint (`makePredicate()`) that builds a SwiftData `Predicate`.
+* **`AnyPredicateRepresentable`**: A type-erased container utilizing static type-opening to safely wrap and compare arbitrary predicate representables without losing type safety or triggering closure equality traps.
+* **`Query2`**: A `@propertyWrapper` and `DynamicProperty` that monitors the environment's `ModelContext` and coordinate changes, driving a reactive view lifecycle via an internal `@Observable` coordinator.
+* **`Query2ResultsView`**: A view helper that injects strongly-typed results and error states directly into your UI closure.
 * **`FetchedModelsController`**: The underlying engine bridging SwiftData models to delegate-driven change notifications.
 
 ---
 
-## Animation & Transaction Behavior
+## API Design: Combining Descriptors & Predicates
 
-### Uncommitted Changes & `notifyAndProcessPendingChanges()`
-
-Because SwiftData mutations occur asynchronously by default, uncommitted in-memory inserts or deletions can close their `withAnimation` transaction block before the `FetchedModelsController` delegate fires.
-
-To ensure uncommitted local writes animate smoothly into view during user actions, call `modelContext.notifyAndProcessPendingChanges()` inside your animation block. This triggers the custom `willPerformChanges` notification required by the observation engine to process pending changes immediately:
+`Query2` allows you to pass a standard `FetchDescriptor` (minus the predicate) alongside any custom `PredicateRepresentable`. A built-in `precondition` ensures that predicates are never accidentally duplicated across both layers:
 
 ```swift
-private func addItem() {
-    let newItem = Item(timestamp: Date())
-    modelContext.insert(newItem)
-    selection = newItem
-
-    withAnimation {
-        modelContext.notifyAndProcessPendingChanges()
+// Initializing with a custom sort descriptor and a modular predicate representable
+Query2ResultsView(Query2(fetchDescriptor, predicateRepresentable: MyPredicate())) { items, config in
+    List(items) { item in
+        Text(item.timestamp, format: .dateTime)
     }
 }
 
@@ -59,7 +50,7 @@ private func addItem() {
 
 ## Usage Example
 
-Here is how cleanly you can drive a dynamic query with sort controls, selection reconciliation, a toolbar action, and explicit error handling using the `.query(_:handleResults:onError:)` modifier:
+Here is how cleanly you can drive a dynamic query with sort controls, selection reconciliation, uncommitted animations, and custom predicate representables:
 
 ```swift
 import SwiftUI
@@ -67,66 +58,62 @@ import SwiftDataX
 
 struct ItemListView: View {
     @State private var ascending = true
-    @State private var items: [Item] = []
     @State private var selection: Item?
-    @State private var fetchError: Error?
     @Environment(\.modelContext) private var modelContext
     
-    // Define a domain-specific query configuration
-    struct SortedItems: FetchDescriptorRepresentable {
-        let ascending: Bool
-         
-        func makeFetchDescriptor() -> FetchDescriptor<Item> {
-            var descriptor = FetchDescriptor<Item>()
-            descriptor.sortBy = [SortDescriptor(\.timestamp, order: ascending ? .forward : .reverse)]
-            return descriptor
+    // 1. Define a modular predicate representable
+    struct FilterByCounter: PredicateRepresentable {
+        let maxCounter: Int
+        
+        func makePredicate() -> Predicate<Item> {
+            let limit = maxCounter
+            return #Predicate<Item> { $0.counter < limit }
         }
+    }
+    
+    // 2. Construct a base FetchDescriptor for sorting
+    var fetchDescriptor: FetchDescriptor<Item> {
+        var descriptor = FetchDescriptor<Item>()
+        descriptor.sortBy = [SortDescriptor(\.timestamp, order: ascending ? .forward : .reverse)]
+        return descriptor
     }
     
     var body: some View {
         NavigationStack {
             VStack {
-                HStack {
-                    Button(ascending ? "Ascending" : "Descending") {
-                        withAnimation {
-                            ascending.toggle()
-                        }
+                Button(ascending ? "Ascending" : "Descending") {
+                    withAnimation {
+                        ascending.toggle()
                     }
-                    Spacer()
-                    Text("\(items.count) items")
                 }
                 .padding()
-                 
-                List(items, selection: $selection) { item in
-                    Text(item.timestamp, format: Date.FormatStyle(date: .numeric, time: .standard))
+                
+                // 3. Drive the view using Query2 and Query2ResultsView
+                Query2ResultsView(Query2(fetchDescriptor, predicateRepresentable: FilterByCounter(maxCounter: 5))) { items, config in
+                    
+                    if let error = config.lastError {
+                        Text("Error loading items: \(error.localizedDescription)")
+                            .foregroundColor(.red)
+                    }
+                    
+                    List(items, selection: $selection) { item in
+                        Text(item.timestamp, format: Date.FormatStyle(date: .numeric, time: .standard))
+                    }
+                    .onChange(of: items.map(\.id)) { oldIDs, newIDs in
+                        if let selected = selection, !newIDs.contains(selected.id) {
+                            let oldIndex = oldIDs.firstIndex(of: selected.id) ?? 0
+                            let safeIndex = min(oldIndex, max(0, newIDs.count - 1))
+                            selection = newIDs.isEmpty ? nil : items[safeIndex]
+                        }
+                    }
                 }
             }
             .toolbar {
-#if os(iOS)
-                ToolbarItem(placement: .navigationBarTrailing) {
-                    EditButton()
-                }
-#endif
                 ToolbarItem {
                     Button(action: addItem) {
                         Label("Add Item", systemImage: "plus")
                     }
                 }
-            }
-            .query(SortedItems(ascending: ascending)) { newItems in
-                // Handle automatic selection fallback if the selected item was deleted
-                if let selected = selection, !newItems.contains(where: { $0 == selected }) {
-                    let oldIndex = items.firstIndex(where: { $0 == selected }) ?? 0
-                    let safeIndex = min(oldIndex, max(0, newItems.count - 1))
-                    selection = newItems.isEmpty ? nil : newItems[safeIndex]
-                }
-                
-                withAnimation {
-                    items = newItems
-                }
-            } onError: { error in
-                fetchError = error
-                print("Query failed: \(error)")
             }
         }
     }
@@ -137,7 +124,7 @@ struct ItemListView: View {
         selection = newItem
         
         withAnimation {
-            modelContext.notifyAndProcessPendingChanges()
+            modelContext.processPendingChanges()
         }
     }
 }

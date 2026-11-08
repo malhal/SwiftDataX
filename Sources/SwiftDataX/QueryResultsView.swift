@@ -1,7 +1,7 @@
 import SwiftData
 import SwiftUI
 
-public struct QueryView<Model, Content>: View where Model: PersistentModel, Content: View {
+public struct QueryResultsView<Model, Content>: View where Model: PersistentModel, Content: View {
     @Query private var models: [Model]
     private let content: ([Model], Context) -> Content
     

@@ -1,150 +1,129 @@
 import SwiftData
 import SwiftUI
 
-public protocol FetchDescriptorRepresentable<ResultType>: Equatable, Sendable {
-    associatedtype ResultType: PersistentModel
-    func makeFetchDescriptor() -> FetchDescriptor<ResultType>
+public protocol PredicateRepresentable<Input>: Equatable {
+    associatedtype Input
+    func makePredicate() -> Predicate<Input>
 }
 
-public struct ModernSortedFetch<Result: PersistentModel>: FetchDescriptorRepresentable {
+// 1. Type-erased wrapper that conforms to BOTH protocols and Equatable
+public struct AnyPredicateRepresentable<Input>: PredicateRepresentable {
+    public typealias Input = Input
     
-    public var sortDescriptors: [SortDescriptor<Result>]
+    private let base: any PredicateRepresentable<Input>
     
-    public init(sortDescriptors: [SortDescriptor<Result>] = []) {
-        self.sortDescriptors = sortDescriptors
+    public init<T: PredicateRepresentable<Input>>(_ base: T) {
+        self.base = base
     }
     
-    public func makeFetchDescriptor() -> FetchDescriptor<Result> {
-        FetchDescriptor<ResultType>(sortBy: sortDescriptors)
-    }
-}
-
-extension ModernSortedFetch {
-    public static func sorted(by descriptors: [SortDescriptor<ResultType>]) -> ModernSortedFetch<ResultType> {
-        ModernSortedFetch(sortDescriptors: descriptors)
-    }
-}
-
-@MainActor @propertyWrapper public struct Query2View<Representable, Content: View>: View where Representable: FetchDescriptorRepresentable {
-    
-    @State private var evaluator = QueryEvaluator<Representable>()
-    
-    @Environment(\.modelContext) private var context
-    
-    private let representable: Representable
-    private let content: ([Representable.ResultType], Error?) -> Content
-    
-    public init(
-        _ representable: Representable,
-        @ViewBuilder content: @escaping ([Representable.ResultType], Error?) -> Content
-    ) {
-        self.representable = representable
-        self.content = content
+    public func makePredicate() -> Predicate<Input> {
+        base.makePredicate()
     }
     
-    struct Config: Equatable {
-        let context: ModelContext
-        let representable: Representable
+    // Equatable conformance for SwiftUI's diffing engine (Zero closures used)
+    public static func == (lhs: AnyPredicateRepresentable<Input>, rhs: AnyPredicateRepresentable<Input>) -> Bool {
+        return areEqual(lhs.base, rhs.base)
     }
     
-    public private(set) var wrappedValue: [Representable.ResultType] = []
-    public private(set) var lastError: Error? = nil
-    
-    public var body: some View {
-        // Evaluates synchronously on every render pass; memoized via callAsFunction
-        let output = evaluator(.init(context: context, representable: representable))
-        content(output.results, output.error)
+    private static func areEqual(_ lhs: any PredicateRepresentable<Input>, _ rhs: any PredicateRepresentable<Input>) -> Bool {
+        func open<T: PredicateRepresentable<Input>>(_ lhsValue: T, _ rhsValue: any PredicateRepresentable<Input>) -> Bool {
+            guard let rhsT = rhsValue as? T else { return false }
+            return lhsValue == rhsT
+        }
+        return open(lhs, rhs)
     }
 }
 
-@MainActor @propertyWrapper public struct Query2<Representable>: @preconcurrency DynamicProperty where Representable: FetchDescriptorRepresentable {
+@MainActor @propertyWrapper public struct Query2<ResultType: PersistentModel>: @preconcurrency DynamicProperty {
     
-    @State private var evaluator = QueryEvaluator<Representable>()
+    @State private var coordinator = Coordinator()
     
-    @Environment(\.modelContext) private var context
+    @Environment(\.modelContext) private var modelContext
     
-    private let representable: Representable
-    private var output = QueryEvaluator<Representable>.Output(results: [], error: nil)
+    private let fetchDescriptorWithoutPredicate: FetchDescriptor<ResultType>
+    private var predicateRepresentable: AnyPredicateRepresentable<ResultType>?
     
-    public init(_ representable: Representable) {
-        self.representable = representable
+    public init<V: PredicateRepresentable<ResultType>>(_ fetchDescriptor: FetchDescriptor<ResultType>, predicateRepresentable: V) {
+        self.init(fetchDescriptor)
+        self.predicateRepresentable = AnyPredicateRepresentable(predicateRepresentable)
     }
     
-    struct Config: Equatable {
-        let context: ModelContext
-        let representable: Representable
+    public init(_ fetchDescriptor: FetchDescriptor<ResultType>) {
+        precondition(
+            fetchDescriptor.predicate == nil,
+            "Do not set a predicate on the FetchDescriptor when using a PredicateRepresentable. Pass the predicate via the representable argument instead."
+        )
+        self.fetchDescriptorWithoutPredicate = fetchDescriptor
     }
     
-    public var wrappedValue: [Representable.ResultType] {
-        output.results
+    public var wrappedValue: [ResultType] {
+        coordinator.config.models
     }
     
-    public var lastError: Error? {
-        output.error
+    public var projectedValue: Config {
+        coordinator.config
     }
     
-    public mutating func update() {
-        output = evaluator(.init(context: context, representable: representable))
+    public func update() {
+        coordinator.update(from: self)
     }
     
+    public struct Config {
+        public internal(set) var models: [ResultType] = []
+        public internal(set) var lastError: (any Error)?
+    }
    
 
+    @MainActor
+    @Observable
+    final class Coordinator: NSObject, @preconcurrency FetchedModelsControllerDelegate {
+        
+        private(set) var config = Config()
+        
+        @ObservationIgnored
+        private var fmc: FetchedModelsController<ResultType>? {
+            didSet {
+                oldValue?.delegate = nil
+                fmc?.delegate = self
+            }
+        }
+        
+        @ObservationIgnored
+        private var fetchDescriptorWithoutPredicate: FetchDescriptor<ResultType>?
+        
+        @ObservationIgnored
+        private var predicateRepresentable: AnyPredicateRepresentable<ResultType>?
+        
+        @ObservationIgnored
+        private var modelContext: ModelContext?
+        
+        func update(from parent: Query2) {
+            if (modelContext, fetchDescriptorWithoutPredicate, predicateRepresentable) == (parent.modelContext, parent.fetchDescriptorWithoutPredicate, parent.predicateRepresentable) {
+                return
+            }
+            modelContext = parent.modelContext
+            predicateRepresentable = parent.predicateRepresentable
+            fetchDescriptorWithoutPredicate = parent.fetchDescriptorWithoutPredicate
+            
+            var fd = parent.fetchDescriptorWithoutPredicate
+            fd.predicate = parent.predicateRepresentable?.makePredicate()
+            
+            do {
+                let fmc = FetchedModelsController<ResultType>(fetchDescriptor: fd, modelContext: parent.modelContext)
+                try fmc.performFetch()
+                self.fmc = fmc
+                _config.models = fmc.fetchedModels ?? []
+                _config.lastError = nil
+            } catch {
+                _config.lastError = error
+                // keep prev models
+            }
+        }
+        
+        public func controllerDidChangeContent<T>(_ controller: FetchedModelsController<T>) where T : PersistentModel {
+            config.models = controller.fetchedModels as? [ResultType] ?? []
+        }
+    }
 }
 
-@MainActor
-@Observable
-class QueryEvaluator<Representable: FetchDescriptorRepresentable>: NSObject, @preconcurrency FetchedModelsControllerDelegate {
-    
-    
-    public struct Input: Equatable {
-        public let context: ModelContext
-        public let representable: Representable
-        
-        public init(context: ModelContext, representable: Representable) {
-            self.context = context
-            self.representable = representable
-        }
-    }
-    
-    public struct Output {
-        public var results: [Representable.ResultType]
-        public var error: Error?
-    }
-    
-    
-    @ObservationIgnored
-    private var lastInput: Input?
-    
-    private var lastOutput = Output(results: [], error: nil)
-    
-    @ObservationIgnored
-    private var fmc: FetchedModelsController<Representable.ResultType>? {
-        didSet {
-            oldValue?.delegate = nil
-            fmc?.delegate = self
-        }
-    }
-    
-    @discardableResult
-    public func callAsFunction(_ input: Input) -> Output {
-        if let lastInput, lastInput == input {
-            return lastOutput
-        }
-        lastInput = input
-        
-        let fetch = input.representable.makeFetchDescriptor()
-        do {
-            let fmc = FetchedModelsController<Representable.ResultType>(fetchDescriptor: fetch, modelContext: input.context)
-            try fmc.performFetch()
-            self.fmc = fmc
-            lastOutput = Output(results: fmc.fetchedModels ?? [], error: nil)
-        } catch {
-            lastOutput.error = error
-        }
-        return lastOutput
-    }
-    
-    public func controllerDidChangeContent<T>(_ controller: FetchedModelsController<T>) where T : PersistentModel {
-        lastOutput = Output(results: controller.fetchedModels as? [Representable.ResultType] ?? [], error: nil)
-    }
-}
+
