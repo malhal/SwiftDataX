@@ -2,26 +2,6 @@ import SwiftData
 import SwiftUI
 
 
-public protocol FetchDescriptorRepresentable<ResultType>: Equatable, Sendable {
-    associatedtype ResultType: PersistentModel
-    func makeFetchDescriptor() -> FetchDescriptor<ResultType> 
-    
-    //func configure(observer: ResultsObserver<ResultType, Never>)
-}
-
-
-//public struct ModernSortedFetch<ResultType: NSManagedObject>: FetchDescriptorConfiguring {
-//
-//    public var sortDescriptors: [SortDescriptor<ResultType>]
-//    
-//    public init(sortDescriptors: [SortDescriptor<ResultType>] = []) {
-//        self.sortDescriptors = sortDescriptors
-//    }
-//    
-//    public func configure(request: NSFetchRequest<ResultType>) {
-//        request.sortDescriptors = sortDescriptors.map { NSSortDescriptor($0) }
-//    }
-//}
 
 //public extension ModernSortedFetch {
 //    /// Creates a fetch configuration with the specified Swift `SortDescriptor`s.

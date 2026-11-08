@@ -24,7 +24,8 @@ public class FetchedModelsController<T: PersistentModel> {
             if delegate != nil {
                 NotificationCenter.default.addObserver(self,
                                                        selector: #selector(update),
-                                                       name: ModelContext.willProcessPendingChangesX,
+                                                       name: ModelContext.didChangeX,
+                                                      // name: ModelContext.willProcessPendingChangesX,
                                                       // name: NSManagedObjectContext.didChangeObjectsNotification,
                                                        object: modelContext)
                                                        //object: nil)
@@ -47,42 +48,125 @@ public class FetchedModelsController<T: PersistentModel> {
     }
     
     @objc private func update(from notification: Notification) {
-        // guard let userInfo = notification.userInfo else { return }
         delegate?.controllerWillChangeContent(self)
         
-        var items = Set(fetchedModels ?? [])
+        guard let userInfo = notification.userInfo else {
+            // Fallback or exit if no payload is present
+            return
+        }
         
-        let changes = modelContext.changedModelsArray.compactMap { $0 as? T }
-        if !changes.isEmpty {
-            if let predicate = fetchDescriptor.predicate {
-                do {
-                    items.subtract(changes)
-                    let changedMatches = try changes.filter(predicate)
-                    items.formUnion(changedMatches)
+        var itemSet = Set(fetchedModels ?? [])
+        
+        // 1. Handle Deletions
+        if let deletedIDs = extractIdentifiers(from: userInfo["deleted"]) {
+            itemSet = Set(itemSet.filter { !deletedIDs.contains($0.persistentModelID) })
+        }
+        
+        // 2. Handle Insertions
+        if let insertedIDs = extractIdentifiers(from: userInfo["inserted"]) {
+            for id in insertedIDs {
+                if let model = modelContext.model(for: id) as? T {
+                    if matchesPredicate(model) {
+                        itemSet.insert(model)
+                    }
                 }
-                catch { print(error) }
             }
         }
         
-        var inserted = modelContext.insertedModelsArray.compactMap { $0 as? T }
-        if let predicate = fetchDescriptor.predicate {
-            do {
-                inserted = try inserted.filter(predicate)
+        // 3. Handle Updates / Changes
+        if let updatedIDs = extractIdentifiers(from: userInfo["updated"]) {
+            for id in updatedIDs {
+                let existingIndex = itemSet.firstIndex(where: { $0.persistentModelID == id })
+                
+                if let model = modelContext.model(for: id) as? T {
+                    if matchesPredicate(model) {
+                        // Update value or insert if it newly matches
+                        if let existingIndex = existingIndex {
+                            itemSet.remove(at: existingIndex)
+                        }
+                        itemSet.insert(model)
+                    } else {
+                        // No longer matches predicate, drop it
+                        if let existingIndex = existingIndex {
+                            itemSet.remove(at: existingIndex)
+                        }
+                    }
+                } else {
+                    // Model couldn't be loaded or was removed
+                    if let existingIndex = existingIndex {
+                        itemSet.remove(at: existingIndex)
+                    }
+                }
             }
-            catch { print(error) }
         }
-        items.formUnion(inserted)
         
-        let deleted = modelContext.deletedModelsArray.compactMap { $0 as? T }
-        items.subtract(deleted)
-        
-        let sorted = Array(items).sorted(using: fetchDescriptor.sortBy)
+        let sorted = Array(itemSet).sorted(using: fetchDescriptor.sortBy)
         if sorted != fetchedModels {
             self.fetchedModels = sorted
         }
         
         delegate?.controllerDidChangeContent(self)
     }
+    
+    // MARK: - Helper Utilities
+    
+    private func extractIdentifiers(from value: Any?) -> Set<PersistentIdentifier>? {
+        if let set = value as? Set<PersistentIdentifier> {
+            return set
+        }
+        if let array = value as? [PersistentIdentifier] {
+            return Set(array)
+        }
+        return nil
+    }
+    
+    private func matchesPredicate(_ model: T) -> Bool {
+        guard let predicate = fetchDescriptor.predicate else { return true }
+        do {
+            return try [model].filter(predicate).isEmpty == false
+        } catch {
+            print("Predicate evaluation error: \(error)")
+            return false
+        }
+    }
+    
+//    @objc private func update(from notification: Notification) {
+//        // guard let userInfo = notification.userInfo else { return }
+//        delegate?.controllerWillChangeContent(self)
+//        
+//        var items = Set(fetchedModels ?? [])
+//        
+//        let changes = modelContext.changedModelsArray.compactMap { $0 as? T }
+//        if !changes.isEmpty {
+//            if let predicate = fetchDescriptor.predicate {
+//                do {
+//                    items.subtract(changes)
+//                    let changedMatches = try changes.filter(predicate)
+//                    items.formUnion(changedMatches)
+//                }
+//                catch { print(error) }
+//            }
+//        }
+//        
+//        var inserted = modelContext.insertedModelsArray.compactMap { $0 as? T }
+//        if let predicate = fetchDescriptor.predicate {
+//            do {
+//                inserted = try inserted.filter(predicate)
+//            }
+//            catch { print(error) }
+//        }
+//        items.formUnion(inserted)
+//        
+//        let deleted = modelContext.deletedModelsArray.compactMap { $0 as? T }
+//        items.subtract(deleted)
+//        
+//        let sorted = Array(items).sorted(using: fetchDescriptor.sortBy)
+//        if sorted != fetchedModels {
+//            self.fetchedModels = sorted
+//        }
+//        
+//        delegate?.controllerDidChangeContent(self)
+//    }
     
 //    @objc private func contextModelsChanged(_ notification: Notification) {
 //        delegate?.controllerWillChangeContent(self)
