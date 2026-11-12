@@ -60,22 +60,18 @@ public class FetchedModelsController<T: PersistentModel> {
     }
     
     @objc private func update(from notification: Notification) {
-        guard let userInfo = notification.userInfo else { return }
-        
+        guard let changes = ModelContextChanges(notification: notification, modelContext: modelContext) else { return }
+
         delegate?.controllerWillChangeContent(self)
-        
+
         // Work with an ordered mutable array copy
         var currentModels = fetchedModels ?? []
-        
-        // 1. Resolve payloads checking multiple possible OS/runtime key variants
-        let insertedPayload = userInfo["inserted"] ?? userInfo["inserted_objectIDs"] ?? userInfo["insertedObjects"]
-        let updatedPayload  = userInfo["updated"]  ?? userInfo["updated_objectIDs"]  ?? userInfo["updatedObjects"]
-        let deletedPayload  = userInfo["deleted"]  ?? userInfo["deleted_objectIDs"]  ?? userInfo["deletedObjects"]
-        
-        let insertedModels = resolveModels(from: insertedPayload)
-        let updatedModels  = resolveModels(from: updatedPayload)
-        let deletedModels  = resolveModels(from: deletedPayload)
-        
+
+        // 1. Resolve changed models of this controller's type
+        let insertedModels = changes.inserted(T.self)
+        let updatedModels  = changes.updated(T.self)
+        let deletedModels  = changes.deleted(T.self)
+
         // 2. Handle Deletions
         for model in deletedModels {
             if let index = currentModels.firstIndex(of: model) {
@@ -145,64 +141,6 @@ public class FetchedModelsController<T: PersistentModel> {
         }
         
         delegate?.controllerDidChangeContent(self)
-    }
-    
-    // MARK: - Unified Model Resolution Helper
-    private func resolveModels(from payload: Any?) -> [T] {
-        var candidateModels: [T] = []
-        
-        let rawModels = extractModels(from: payload)
-        if !rawModels.isEmpty {
-            candidateModels = rawModels.compactMap { $0 as? T }
-        } else if let ids = extractIdentifiers(from: payload) {
-            candidateModels = ids.compactMap { modelContext.model(for: $0) as? T }
-        }
-        
-        return candidateModels
-    }
-    
-    
-    // MARK: - Helper Utilities
-    
-    private func extractModels(from value: Any?) -> [any PersistentModel] {
-        var models: [any PersistentModel] = []
-        
-        // Unwrap optional collection if necessary
-        var targetCollection: Any = value ?? []
-        let mirror = Mirror(reflecting: value as Any)
-        if mirror.displayStyle == .optional, let first = mirror.children.first {
-            targetCollection = first.value
-        }
-        
-        // Iterate through the collection items generically
-        if let sequence = targetCollection as? any Sequence {
-            for element in sequence {
-                // 1. Direct model instance match
-                if let model = element as? (any PersistentModel) {
-                    models.append(model)
-                }
-                // 2. Wrapped internal object (e.g., AnyPersistentObject with a 'boxed' property)
-                else {
-                    let elementMirror = Mirror(reflecting: element)
-                    for child in elementMirror.children {
-                        if child.label == "boxed", let model = child.value as? (any PersistentModel) {
-                            models.append(model)
-                        }
-                    }
-                }
-            }
-        }
-        return models
-    }
-    
-    private func extractIdentifiers(from value: Any?) -> Set<PersistentIdentifier>? {
-        if let set = value as? Set<PersistentIdentifier> {
-            return set
-        }
-        if let array = value as? [PersistentIdentifier] {
-            return Set(array)
-        }
-        return nil
     }
     
     private func matchesPredicate(_ model: T) -> Bool {
