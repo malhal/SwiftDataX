@@ -1,36 +1,29 @@
+//
+//  Query2.swift
+//  SwiftDataX
+//
+//  Created by Malcolm Hall on 08/11/2026.
+
 import SwiftData
 import SwiftUI
 
-public protocol PredicateRepresentable<Input>: Equatable {
-    associatedtype Input
-    func makePredicate() -> Predicate<Input>
-}
-
-// 1. Type-erased wrapper that conforms to BOTH protocols and Equatable
-public struct AnyPredicateRepresentable<Input>: PredicateRepresentable {
-    public typealias Input = Input
+public struct EquatableFetchDescriptor<ResultType: PersistentModel>: Equatable {
+    public let descriptor: FetchDescriptor<ResultType>
+    private let baseDescriptor: FetchDescriptor<ResultType>
+    private let predicateDescription: String?
     
-    private let base: any PredicateRepresentable<Input>
-    
-    public init<T: PredicateRepresentable<Input>>(_ base: T) {
-        self.base = base
+    public init(_ descriptor: FetchDescriptor<ResultType>) {
+        self.descriptor = descriptor
+        self.predicateDescription = descriptor.predicate.map { String(describing: $0) }
+        
+        var base = descriptor
+        base.predicate = nil
+        self.baseDescriptor = base
     }
     
-    public func makePredicate() -> Predicate<Input> {
-        base.makePredicate()
-    }
-    
-    // Equatable conformance for SwiftUI's diffing engine (Zero closures used)
-    public static func == (lhs: AnyPredicateRepresentable<Input>, rhs: AnyPredicateRepresentable<Input>) -> Bool {
-        return areEqual(lhs.base, rhs.base)
-    }
-    
-    private static func areEqual(_ lhs: any PredicateRepresentable<Input>, _ rhs: any PredicateRepresentable<Input>) -> Bool {
-        func open<T: PredicateRepresentable<Input>>(_ lhsValue: T, _ rhsValue: any PredicateRepresentable<Input>) -> Bool {
-            guard let rhsT = rhsValue as? T else { return false }
-            return lhsValue == rhsT
-        }
-        return open(lhs, rhs)
+    public static func == (lhs: Self, rhs: Self) -> Bool {
+        lhs.baseDescriptor == rhs.baseDescriptor &&
+        lhs.predicateDescription == rhs.predicateDescription
     }
 }
 
@@ -40,20 +33,14 @@ public struct AnyPredicateRepresentable<Input>: PredicateRepresentable {
     
     @Environment(\.modelContext) private var modelContext
     
-    private let fetchDescriptorWithoutPredicate: FetchDescriptor<ResultType>
-    private var predicateRepresentable: AnyPredicateRepresentable<ResultType>?
-    
-    public init<V: PredicateRepresentable<ResultType>>(_ fetchDescriptor: FetchDescriptor<ResultType>, predicateRepresentable: V) {
-        self.init(fetchDescriptor)
-        self.predicateRepresentable = AnyPredicateRepresentable(predicateRepresentable)
+    struct FetchDescriptorEquatableFix: Equatable {
+        let fetchDescriptor: FetchDescriptor<ResultType>
     }
     
+    private let equtatableFetchDescriptor: EquatableFetchDescriptor<ResultType>
+    
     public init(_ fetchDescriptor: FetchDescriptor<ResultType>) {
-        precondition(
-            fetchDescriptor.predicate == nil,
-            "Do not set a predicate on the FetchDescriptor when using a PredicateRepresentable. Pass the predicate via the representable argument instead."
-        )
-        self.fetchDescriptorWithoutPredicate = fetchDescriptor
+        self.equtatableFetchDescriptor = EquatableFetchDescriptor(fetchDescriptor)
     }
     
     public var wrappedValue: [ResultType] {
@@ -72,8 +59,8 @@ public struct AnyPredicateRepresentable<Input>: PredicateRepresentable {
         public internal(set) var models: [ResultType] = []
         public internal(set) var lastError: (any Error)?
     }
-   
-
+    
+    
     @MainActor
     @Observable
     final class Coordinator: NSObject, @preconcurrency FetchedModelsControllerDelegate {
@@ -89,27 +76,20 @@ public struct AnyPredicateRepresentable<Input>: PredicateRepresentable {
         }
         
         @ObservationIgnored
-        private var fetchDescriptorWithoutPredicate: FetchDescriptor<ResultType>?
-        
-        @ObservationIgnored
-        private var predicateRepresentable: AnyPredicateRepresentable<ResultType>?
+        private var equtatableFetchDescriptor: EquatableFetchDescriptor<ResultType>?
         
         @ObservationIgnored
         private var modelContext: ModelContext?
         
         func update(from parent: Query2) {
-            if (modelContext, fetchDescriptorWithoutPredicate, predicateRepresentable) == (parent.modelContext, parent.fetchDescriptorWithoutPredicate, parent.predicateRepresentable) {
+            if (modelContext, equtatableFetchDescriptor) == (parent.modelContext, parent.equtatableFetchDescriptor) {
                 return
             }
             modelContext = parent.modelContext
-            predicateRepresentable = parent.predicateRepresentable
-            fetchDescriptorWithoutPredicate = parent.fetchDescriptorWithoutPredicate
-            
-            var fd = parent.fetchDescriptorWithoutPredicate
-            fd.predicate = parent.predicateRepresentable?.makePredicate()
+            equtatableFetchDescriptor = parent.equtatableFetchDescriptor
             
             do {
-                let fmc = FetchedModelsController<ResultType>(fetchDescriptor: fd, modelContext: parent.modelContext)
+                let fmc = FetchedModelsController<ResultType>(fetchDescriptor: parent.equtatableFetchDescriptor.descriptor, modelContext: parent.modelContext)
                 try fmc.performFetch()
                 self.fmc = fmc
                 _config.models = fmc.fetchedModels ?? []
