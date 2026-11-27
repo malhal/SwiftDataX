@@ -2,7 +2,7 @@
 
 > **Archived:** SwiftDataX has been merged into [swift-mh](https://github.com/malhal/swift-mh). Use `FetchedModelsView` and `MHFetchedModelsController` from its `MHSwiftData` module instead. This repository is no longer updated.
 
-`SwiftDataX` provides a high-performance, closure-driven query architecture for SwiftData centered around `FetchedModelsController`—a SwiftData equivalent to Core Data's `NSFetchedResultsController`. It replaces traditional rigid query property wrappers with a flexible view modifier and property wrapper combination that supports complex `FetchDescriptor` configurations, modular predicates, explicit error handling, and seamless animation preservation.
+`SwiftDataX` provides a closure-driven query view for SwiftData built on `FetchedModelsController`, a SwiftData equivalent of Core Data's `NSFetchedResultsController`. Instead of the `@Query` property wrapper, you pass any `FetchDescriptor` to `FetchedModelsView` and get the results and fetch error in a closure. The results update in place as models are inserted, updated and deleted, so list animations are preserved.
 
 ---
 
@@ -10,107 +10,110 @@
 
 ### 1. Solving the Predicate Comparison Problem
 
-SwiftData's native `FetchDescriptor` is a value type, but its `.predicate` property relies on runtime `#Predicate` closures that **cannot be compared for equality (`Equatable`) by the compiler**.
+`FetchDescriptor` is a value type, but its `predicate` is a `#Predicate` closure that **cannot be compared for equality**. Without a way to tell whether a descriptor changed, a view would have to refetch every time its `body` is recomputed.
 
-If you attempt to diff raw descriptors directly, the system has no way to evaluate whether two predicates match, forcing queries to re-execute redundantly on every single view body evaluation. `SwiftDataX` introduces an **Equatable Guardian** pattern via `PredicateRepresentable`:
+`EquatableFetchDescriptor` wraps a descriptor and makes it `Equatable`:
 
-* **The Core Descriptor**: Handles standard parameters like sort descriptors, limits, offsets, and prefetching keys natively.
-* **The Predicate Representable**: Encapsulates the predicate inside a lightweight, equatable configuration type.
-* **The Result**: The controller only tears down and re-fetches when underlying query parameters or predicate configurations actually mutate.
+* **Everything but the predicate** (sort descriptors, fetch limit, offset, relationship key paths to prefetch, and so on) is compared natively.
+* **The predicate** is compared by its `String(describing:)` text, which includes the values it captures.
+* **The result**: `FetchedModelsView` only builds a new controller and refetches when the query actually changes.
 
-### 2. Explicit Error Boundaries & Fine-Grained Control
+### 2. Errors as a Closure Parameter
 
-Unlike standard SwiftUI property wrappers that fail silently or lack error interception, `Query2` exposes database fetch exceptions directly to the view layer via its projected configuration state (`projectedValue`), keeping your success and error paths cleanly separated.
+Like `@Query`, which exposes the error of its last fetch through its property wrapper (`_items.fetchError`), `FetchedModelsView` provides the error of the last fetch, but as a parameter of your content closure. When a fetch fails, the previous results are kept.
 
 ---
 
 ## Core Components
 
-* **`PredicateRepresentable`**: A protocol defining a lightweight, equatable, and sendable configuration blueprint (`makePredicate()`) that builds a SwiftData `Predicate`.
-* **`AnyPredicateRepresentable`**: A type-erased container utilizing static type-opening to safely wrap and compare arbitrary predicate representables without losing type safety or triggering closure equality traps.
-* **`Query2`**: A `@propertyWrapper` and `DynamicProperty` that monitors the environment's `ModelContext` and coordinate changes, driving a reactive view lifecycle via an internal `@Observable` coordinator.
-* **`Query2ResultsView`**: A view helper that injects strongly-typed results and error states directly into your UI closure.
-* **`FetchedModelsController`**: The underlying engine bridging SwiftData models to delegate-driven change notifications.
+* **`FetchedModelsView`**: A view that fetches a `FetchDescriptor` from the environment's `ModelContext` and passes the results and the last fetch error to its content closure. It refetches when the descriptor or the model context changes.
+* **`EquatableFetchDescriptor`**: Wraps a `FetchDescriptor` to make it `Equatable`, comparing the predicate by its description.
+* **`FetchedModelsController`**: The engine behind the view. It performs the fetch, then observes the model context's changes and applies inserts, updates, deletes and moves to the results, notifying its delegate.
+* **`ModelContextChanges`**: Parses the inserted, updated and deleted models from the model context's change notification.
+* **`QueryResultsView`**: A view that wraps a standard SwiftData `Query` and passes its results, fetch error and model context to a content closure.
 
 ---
 
-## API Design: Combining Descriptors & Predicates
+## API Design
 
-`Query2` allows you to pass a standard `FetchDescriptor` (minus the predicate) alongside any custom `PredicateRepresentable`. A built-in `precondition` ensures that predicates are never accidentally duplicated across both layers:
+Pass a `FetchDescriptor`, including its predicate, and a closure that receives the results and the error of the last fetch:
 
 ```swift
-// Initializing with a custom sort descriptor and a modular predicate representable
-Query2ResultsView(Query2(fetchDescriptor, predicateRepresentable: MyPredicate())) { items, config in
+FetchedModelsView(fetchDescriptor) { items, error in
     List(items) { item in
         Text(item.timestamp, format: .dateTime)
     }
 }
-
 ```
 
 ---
 
 ## Usage Example
 
-Here is how cleanly you can drive a dynamic query with sort controls, selection reconciliation, uncommitted animations, and custom predicate representables:
+A list with a sort order and a filter that change the query, an error message, animated changes, and a selection that moves to the next item when the selected item is deleted:
 
 ```swift
 import SwiftUI
+import SwiftData
 import SwiftDataX
+
+@Model
+final class Item {
+    var timestamp = Date()
+    var counter = 0
+    
+    init() { }
+}
 
 struct ItemListView: View {
     @State private var ascending = true
-    @State private var selection: Item?
+    @State private var maxCounter = 5
+    @State private var selection: PersistentIdentifier?
     @Environment(\.modelContext) private var modelContext
     
-    // 1. Define a modular predicate representable
-    struct FilterByCounter: PredicateRepresentable {
-        let maxCounter: Int
-        
-        func makePredicate() -> Predicate<Item> {
-            let limit = maxCounter
-            return #Predicate<Item> { $0.counter < limit }
-        }
-    }
-    
-    // 2. Construct a base FetchDescriptor for sorting
-    var fetchDescriptor: FetchDescriptor<Item> {
-        var descriptor = FetchDescriptor<Item>()
-        descriptor.sortBy = [SortDescriptor(\.timestamp, order: ascending ? .forward : .reverse)]
-        return descriptor
+    // A new descriptor is built on every recomputation of body;
+    // FetchedModelsView only refetches when it actually differs.
+    private var fetchDescriptor: FetchDescriptor<Item> {
+        let limit = maxCounter
+        return FetchDescriptor<Item>(
+            predicate: #Predicate { $0.counter < limit },
+            sortBy: [SortDescriptor(\.timestamp, order: ascending ? .forward : .reverse)]
+        )
     }
     
     var body: some View {
         NavigationStack {
-            VStack {
-                Button(ascending ? "Ascending" : "Descending") {
-                    withAnimation {
-                        ascending.toggle()
-                    }
-                }
-                .padding()
-                
-                // 3. Drive the view using Query2 and Query2ResultsView
-                Query2ResultsView(Query2(fetchDescriptor, predicateRepresentable: FilterByCounter(maxCounter: 5))) { items, config in
-                    
-                    if let error = config.lastError {
+            FetchedModelsView(fetchDescriptor) { items, error in
+                VStack {
+                    if let error {
                         Text("Error loading items: \(error.localizedDescription)")
-                            .foregroundColor(.red)
+                            .foregroundStyle(.red)
                     }
                     
-                    List(items, selection: $selection) { item in
-                        Text(item.timestamp, format: Date.FormatStyle(date: .numeric, time: .standard))
-                    }
-                    .onChange(of: items.map(\.id)) { oldIDs, newIDs in
-                        if let selected = selection, !newIDs.contains(selected.id) {
-                            let oldIndex = oldIDs.firstIndex(of: selected.id) ?? 0
-                            let safeIndex = min(oldIndex, max(0, newIDs.count - 1))
-                            selection = newIDs.isEmpty ? nil : items[safeIndex]
+                    List(selection: $selection) {
+                        ForEach(items) { item in
+                            Text(item.timestamp, format: Date.FormatStyle(date: .numeric, time: .standard))
+                                .tag(item.persistentModelID)
                         }
                     }
+                    .animation(.default, value: items.map(\.persistentModelID))
+                }
+                .onChange(of: items.map(\.persistentModelID)) { oldIDs, newIDs in
+                    // The selected item was deleted, from anywhere: select the item now in its place.
+                    guard let selected = selection, !newIDs.contains(selected) else { return }
+                    let oldIndex = oldIDs.firstIndex(of: selected) ?? 0
+                    selection = newIDs.isEmpty ? nil : newIDs[min(oldIndex, newIDs.count - 1)]
                 }
             }
             .toolbar {
+                ToolbarItem {
+                    Button(ascending ? "Ascending" : "Descending") {
+                        ascending.toggle()
+                    }
+                }
+                ToolbarItem {
+                    Stepper("Max Counter \(maxCounter)", value: $maxCounter)
+                }
                 ToolbarItem {
                     Button(action: addItem) {
                         Label("Add Item", systemImage: "plus")
@@ -121,14 +124,9 @@ struct ItemListView: View {
     }
     
     private func addItem() {
-        let newItem = Item(timestamp: Date())
+        let newItem = Item()
         modelContext.insert(newItem)
-        selection = newItem
-        
-        withAnimation {
-            modelContext.processPendingChanges()
-        }
+        selection = newItem.persistentModelID
     }
 }
-
 ```
