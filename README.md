@@ -1,5 +1,7 @@
 # SwiftDataX
 
+> **Archived:** SwiftDataX has been merged into [swift-mh](https://github.com/malhal/swift-mh). Use `FetchedModelsView` and `MHFetchedModelsController` from its `MHSwiftData` module instead. This repository is no longer updated.
+
 `SwiftDataX` provides a high-performance, closure-driven query architecture for SwiftData centered around `FetchedModelsController`—a SwiftData equivalent to Core Data's `NSFetchedResultsController`. It replaces traditional rigid query property wrappers with a flexible view modifier and property wrapper combination that supports complex `FetchDescriptor` configurations, modular predicates, explicit error handling, and seamless animation preservation.
 
 ---
